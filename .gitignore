@@ -33,3 +33,9 @@ DataBscan/
 # 环境
 .env
 venv/
+
+# Claude Code 配置（含本地设置/令牌）
+.claude/
+
+# macOS
+.DS_Store
