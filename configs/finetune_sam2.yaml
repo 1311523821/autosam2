@@ -1,0 +1,46 @@
+# SAM 2 微调配置
+
+# 模型配置
+model:
+  sam2_config: configs/sam2.1/sam2.1_hiera_t.yaml
+  sam2_checkpoint: checkpoints/sam2.1_hiera_tiny.pt
+
+  # 冻结策略
+  freeze_image_encoder: true
+  freeze_memory_encoder: true
+  freeze_memory_attention: true
+  freeze_prompt_encoder: true
+
+  # 仅训练Mask Decoder
+  finetune_mask_decoder: true
+
+# 数据配置
+data:
+  data_root: /root/DataBscan
+  train_list: /root/e2e/train1.txt
+  test_list: /root/e2e/test1.txt
+  target_label: uuv
+
+# 训练配置
+training:
+  epochs: 50
+  batch_size: 1  # 视频级别批处理
+  lr: 1e-5       # 保守学习率
+  weight_decay: 1e-4
+  scheduler: cosine
+  warmup_epochs: 0
+
+  # 保存策略
+  save_every: 10
+
+# 损失函数配置
+loss:
+  dice_weight: 1.0
+  focal_weight: 1.0
+  focal_gamma: 2.0
+
+# 输出配置
+output:
+  checkpoint_dir: checkpoints/sam2_finetuned
+  log_dir: logs/sam2_finetune
+  result_dir: results/phase3_sam2_finetune

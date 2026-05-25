@@ -1,0 +1,35 @@
+# Checkpoints (太大，不提交)
+checkpoints/
+*.pth
+*.pt
+
+# 训练结果
+results/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+
+# 临时文件
+*.tmp
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 数据
+DataBscan/
+*.jpg
+*.jpeg
+*.png
+*.json
+
+# 环境
+.env
+venv/

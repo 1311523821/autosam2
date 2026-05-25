@@ -1,0 +1,65 @@
+# Auto-Prompt SAM 2 Default Configuration
+
+# Data
+data:
+  root_dir: /root/DataBscan
+  train_list: /root/e2e/train1.txt
+  test_list: /root/e2e/test1.txt
+  target_label: uuv
+  # 注意：图像使用原始尺寸，不做resize（与LVNet一致）
+  # 实际图像尺寸: 1000 x 500 (W x H)
+
+# Model
+model:
+  # Guidance Head（引导头）
+  # 复用LVNet的STSF编码器，需要4帧输入计算时序方差特征
+  guidance_head:
+    in_chans: 1          # 输入通道数（灰度图）
+    clip_len: 4          # 时序帧数，STSF编码器需要4帧
+    embed_dim: 24        # 嵌入维度
+    encoder_type: stsf   # 编码器类型: stsf 或 cnn
+
+  # SAM 2 视频跟踪器
+  # 注意：SAM 2处理整个视频序列，不需要clip_len限制
+  sam2:
+    config: configs/sam2.1/sam2.1_hiera_l.yaml
+    checkpoint: checkpoints/sam2.1_hiera_large.pt
+    freeze: true         # 冻结SAM 2权重，只训练引导头
+
+# Training
+training:
+  batch_size: 8
+  num_workers: 4
+  epochs: 100
+  lr: 1e-4
+  weight_decay: 1e-4
+  scheduler: cosine
+  warmup_epochs: 5
+
+  # Loss
+  loss:
+    type: mse_focal
+    mse_weight: 1.0
+    focal_weight: 1.0
+    focal_gamma: 2.0
+
+  # Heatmap
+  heatmap:
+    sigma: 5.0
+
+# Evaluation
+evaluation:
+  metrics: [iou, niou, pd, fa]
+  save_visualizations: true
+
+# Re-prompting
+reprompt:
+  enable: true
+  area_threshold: 0.3
+  confidence_threshold: 0.5
+
+# Paths
+paths:
+  checkpoint_dir: checkpoints
+  log_dir: logs
+  result_dir: results
