@@ -313,7 +313,9 @@ th { background: var(--code-bg); font-weight: 600; color: var(--text2); font-siz
   </div>
 
   <div class="pie-container">
-    <canvas id="pieChart" width="200" height="200" style="width:200px; height:200px;"></canvas>
+    <div style="width:200px; height:200px; position:relative; flex-shrink:0;">
+      <canvas id="pieChart" width="200" height="200"></canvas>
+    </div>
     <div class="pie-legend">
       <span><span class="dot" style="background:var(--purple)"></span> LoRA 可训练: <strong id="lora-params">0.09M</strong></span>
       <span><span class="dot" style="background:var(--green)"></span> Mask Decoder: <strong>4.22M</strong></span>
@@ -512,9 +514,10 @@ function updateParams() {
   document.getElementById('frozen-params').textContent = (39.04 - totalTrainable).toFixed(2) + 'M';
   document.getElementById('total-trainable').textContent = totalTrainable.toFixed(2) + 'M (' + (totalTrainable/39.04*100).toFixed(1) + '%)';
 
-  const ctx = document.getElementById('pieChart');
+  const canvas = document.getElementById('pieChart');
+  if (!canvas) return;
   if (pieChart) pieChart.destroy();
-  pieChart = new Chart(ctx, {
+  pieChart = new Chart(canvas, {
     type: 'doughnut',
     data: {
       labels: ['LoRA 可训练', 'Mask Decoder', '冻结参数'],
@@ -566,9 +569,10 @@ function runSimulation() {
     valIoU.push(Math.min(Math.max(iou, 0), 0.65));
   }
 
-  const ctx1 = document.getElementById('lossChart');
+  const canvas1 = document.getElementById('lossChart');
+  if (!canvas1) return;
   if (lossChart) lossChart.destroy();
-  lossChart = new Chart(ctx1, {
+  lossChart = new Chart(canvas1, {
     type: 'line',
     data: {
       labels: epochs,
@@ -585,9 +589,10 @@ function runSimulation() {
     }
   });
 
-  const ctx2 = document.getElementById('iouChart');
+  const canvas2 = document.getElementById('iouChart');
+  if (!canvas2) return;
   if (iouChart) iouChart.destroy();
-  iouChart = new Chart(ctx2, {
+  iouChart = new Chart(canvas2, {
     type: 'line',
     data: {
       labels: epochs,
@@ -605,6 +610,7 @@ function runSimulation() {
 }
 
 // ==================== Loss Function Charts ====================
+let tverskyChart, diceChart, focalChart;
 function updateLossParams() {
   const alpha = parseFloat(document.getElementById('tv-alpha').value);
   const beta = parseFloat(document.getElementById('tv-beta').value);
@@ -620,12 +626,13 @@ function updateLossParams() {
 }
 
 function renderTverskyChart(alpha, beta) {
-  const ctx = document.getElementById('tverskyChart');
-  if (ctx._chart) ctx._chart.destroy();
+  const canvas = document.getElementById('tverskyChart');
+  if (!canvas) return;
+  if (tverskyChart) tverskyChart.destroy();
   const p = Array.from({length: 100}, (_, i) => i / 100);
   const dice = p.map(p => 2 * p * 0.3 / (p + 0.3 + 1e-6));
   const tversky = p.map(p => p * 0.3 / (p * 0.3 + alpha * (0.3 - p * 0.3) + beta * (p - p * 0.3) + 1e-6));
-  ctx._chart = new Chart(ctx, {
+  tverskyChart = new Chart(canvas, {
     type: 'line',
     data: {
       labels: p.map(v => (v*100).toFixed(0)+'%'),
@@ -643,11 +650,12 @@ function renderTverskyChart(alpha, beta) {
 }
 
 function renderDiceChart() {
-  const ctx = document.getElementById('diceChart');
-  if (ctx._chart) ctx._chart.destroy();
+  const canvas = document.getElementById('diceChart');
+  if (!canvas) return;
+  if (diceChart) diceChart.destroy();
   const overlap = Array.from({length: 100}, (_, i) => i / 100);
   const dice = overlap.map(o => 2 * o / (1 + o + 1e-6));
-  ctx._chart = new Chart(ctx, {
+  diceChart = new Chart(canvas, {
     type: 'line',
     data: {
       labels: overlap,
@@ -662,12 +670,13 @@ function renderDiceChart() {
 }
 
 function renderFocalChart(gamma) {
-  const ctx = document.getElementById('focalChart');
-  if (ctx._chart) ctx._chart.destroy();
+  const canvas = document.getElementById('focalChart');
+  if (!canvas) return;
+  if (focalChart) focalChart.destroy();
   const pt = Array.from({length: 100}, (_, i) => (i + 1) / 100);
   const focal0 = pt.map(p => -Math.log(Math.max(p, 0.01)));
-  const focalG = pt.map(p => -(1 - p) ** gamma * Math.log(Math.max(p, 0.01)));
-  ctx._chart = new Chart(ctx, {
+  const focalG = pt.map(p => -((1 - p) ** gamma) * Math.log(Math.max(p, 0.01)));
+  focalChart = new Chart(canvas, {
     type: 'line',
     data: {
       labels: pt,
