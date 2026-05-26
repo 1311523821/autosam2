@@ -82,6 +82,51 @@ def parse_args():
     return parser.parse_args()
 
 
+def apply_augmentation(batch_frames):
+    """
+    声呐时序数据增强（在 batch 级别随机应用）
+
+    增强策略：
+    - 水平翻转 (50%): 声呐沿轨迹方向对称
+    - 时间逆序 (30%): 目标可以正向或反向移动
+    - 亮度抖动 (50%): 模拟不同 SNR 条件
+    - 随机平移 (30%): 模拟目标位置变化
+
+    注意：不做垂直翻转，因为声呐的深度/距离轴不对称
+    """
+    if np.random.random() < 0.5:
+        # 水平翻转（bearing 轴对称）
+        for f in batch_frames:
+            f['image'] = torch.flip(f['image'], dims=[-1])  # 翻转 W 轴
+            f['gt_mask'] = torch.flip(f['gt_mask'], dims=[-1])
+            # 修正 prompt 点坐标
+            W = f['image'].shape[-1]
+            f['point'][..., 0] = W - f['point'][..., 0]
+
+    if np.random.random() < 0.3:
+        # 时间逆序（帧序列反转）
+        batch_frames.reverse()
+
+    if np.random.random() < 0.5:
+        # 亮度/对比度抖动（模拟不同 SNR）
+        brightness = 0.85 + np.random.random() * 0.3   # [0.85, 1.15]
+        contrast = 0.9 + np.random.random() * 0.2      # [0.9, 1.1]
+        for f in batch_frames:
+            f['image'] = torch.clamp((f['image'] * brightness + (1 - brightness) * 0.5) * contrast, -3, 3)
+
+    if np.random.random() < 0.3:
+        # 小幅度平移（±5% 图像尺寸）
+        shift_x = int(0.05 * np.random.randn() * f['image'].shape[-1])
+        shift_y = int(0.05 * np.random.randn() * f['image'].shape[-2])
+        for f in batch_frames:
+            f['image'] = torch.roll(f['image'], shifts=(shift_y, shift_x), dims=(-2, -1))
+            f['gt_mask'] = torch.roll(f['gt_mask'], shifts=(shift_y, shift_x), dims=(-2, -1))
+            f['point'][..., 0] += shift_x
+            f['point'][..., 1] += shift_y
+
+    return batch_frames
+
+
 def load_video_frames(video_folder, target_label, image_size):
     """
     加载单个视频的所有有效帧（按需加载，避免OOM）
@@ -381,6 +426,9 @@ def main():
 
                     if len(batch_frames) < args.batch_size and i < len(video_frames) - 1:
                         continue
+
+                    # 数据增强（仅训练时）
+                    batch_frames = apply_augmentation(batch_frames)
 
                     # 拼接 batch
                     images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
