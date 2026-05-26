@@ -435,7 +435,7 @@ def main():
                     # 拼接 batch
                     images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
                     points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).unsqueeze(1).to(args.device)  # (B,2)→(B,1,2)
-                    point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).unsqueeze(1).to(args.device)  # (B,)→(B,1)
+                    point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)  # (B,1) - 2 dims
                     gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
 
                     # 双优化器时，在每个累积周期开始时清零梯度
