@@ -232,7 +232,7 @@ def validate(model, test_folders, data_root, target_label, image_size, loss_fn, 
             if not os.path.isdir(folder_path):
                 continue
 
-            video_frames = load_video_frames(folder_path, target_label, image_size)
+            video_frames = val_all_frames.get(folder, [])
             if not video_frames:
                 continue
 
@@ -304,6 +304,34 @@ def main():
     print(f"学习率: {args.lr}")
     print(f"LoRA秩: {args.lora_rank}")
     print(f"图像大小: {args.image_size}")
+
+    # 预加载训练帧到内存（避免每epoch重复磁盘IO）
+    print("\n预加载训练数据...")
+    train_all_frames = {}  # {folder: [frames]}
+    train_total = 0
+    for folder in tqdm(train_folders, desc="加载训练帧"):
+        folder_path = os.path.join(args.data_root, folder)
+        if not os.path.isdir(folder_path):
+            continue
+        frames = load_video_frames(folder_path, args.target_label, args.image_size)
+        if frames:
+            train_all_frames[folder] = frames
+            train_total += len(frames)
+    print(f"训练帧总数: {train_total}")
+
+    # 预加载验证帧
+    print("预加载验证数据...")
+    val_all_frames = {}
+    val_total = 0
+    for folder in tqdm(test_folders, desc="加载验证帧"):
+        folder_path = os.path.join(args.data_root, folder)
+        if not os.path.isdir(folder_path):
+            continue
+        frames = load_video_frames(folder_path, args.target_label, args.image_size)
+        if frames:
+            val_all_frames[folder] = frames
+            val_total += len(frames)
+    print(f"验证帧总数: {val_total}")
 
     # 构建模型
     print(f"\n加载模型: {args.sam2_ckpt}")
@@ -412,7 +440,7 @@ def main():
                 continue
 
             try:
-                video_frames = load_video_frames(folder_path, args.target_label, args.image_size)
+                video_frames = train_all_frames.get(folder, [])  # 使用缓存
                 if not video_frames:
                     continue
 
@@ -421,7 +449,6 @@ def main():
 
                 # 批次处理：batch_size 帧拼成一个 tensor
                 batch_frames = []
-                accum_count = 0
 
                 for i, frame_data in enumerate(video_frames):
                     batch_frames.append(frame_data)
