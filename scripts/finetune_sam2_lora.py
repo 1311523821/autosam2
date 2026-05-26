@@ -59,8 +59,10 @@ def parse_args():
                         help='分割损失函数: dice 或 tversky (对小目标更友好)')
     parser.add_argument('--image-size', type=int, default=1024,
                         help='训练图像分辨率（必须为1024，SAM2的内部分辨率硬编码）')
-    parser.add_argument('--batch-size', type=int, default=1,
-                        help='批大小（单帧模式）')
+    parser.add_argument('--batch-size', type=int, default=2,
+                        help='批大小（2=安全上限，4会炸显存）')
+    parser.add_argument('--grad-accum', type=int, default=8,
+                        help='梯度累积步数（模拟batch_size*8，提升GPU利用率）')
     parser.add_argument('--save-every', type=int, default=10)
     parser.add_argument('--val-every', type=int, default=5,
                         help='每N个epoch验证一次（单帧loss，非端到端指标）')
@@ -370,22 +372,38 @@ def main():
                 # 视频内打乱
                 np.random.shuffle(video_frames)
 
-                for frame_data in video_frames:
-                    image = frame_data['image'].unsqueeze(0).to(args.device)
-                    point = torch.from_numpy(frame_data['point']).to(args.device)
-                    point_label = torch.from_numpy(frame_data['point_label']).to(args.device)
-                    gt_mask = frame_data['gt_mask'].unsqueeze(0).to(args.device)
+                # 批次处理：batch_size 帧拼成一个 tensor
+                batch_frames = []
+                accum_count = 0
 
-                    # 双优化器时，在调用 train_step 前清零所有优化器
-                    if use_dual_opt:
+                for i, frame_data in enumerate(video_frames):
+                    batch_frames.append(frame_data)
+
+                    if len(batch_frames) < args.batch_size and i < len(video_frames) - 1:
+                        continue
+
+                    # 拼接 batch
+                    images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
+                    points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).to(args.device)
+                    point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)
+                    gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
+
+                    # 双优化器时，在每个累积周期开始时清零梯度
+                    if use_dual_opt and accum_count == 0:
                         optimizer.zero_grad()
                         if adam_opt:
                             adam_opt.zero_grad()
 
-                    result = model.train_step(image, point, point_label, gt_mask,
+                    result = model.train_step(images, points, point_labels, gt_masks,
                                               optimizer, loss_fn, grad_clip=GRAD_CLIP,
                                               scaler=scaler if args.amp else None,
-                                              second_optimizer=adam_opt if use_dual_opt else None)
+                                              second_optimizer=adam_opt if use_dual_opt else None,
+                                              skip_step=(accum_count + 1 < args.grad_accum))
+                    accum_count += 1
+                    if accum_count >= args.grad_accum:
+                        accum_count = 0
+
+                    batch_frames = []  # 清空准备下一批
 
                     if result['valid']:
                         epoch_loss += result['loss']

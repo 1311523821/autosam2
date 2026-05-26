@@ -456,7 +456,12 @@ class SAM2LoRAFineTuner(nn.Module):
             image_embed = backbone_out
             high_res_features = None
 
-        # 2. Prompt 编码
+        # 2. Prompt 编码（确保 batch 维度正确：(B, N, 2) 和 (B, N)）
+        if point_coords.dim() == 2:
+            point_coords = point_coords.unsqueeze(0)
+        if point_labels.dim() == 1:
+            point_labels = point_labels.unsqueeze(0)
+
         sparse_embeddings, dense_embeddings = self.model.sam_prompt_encoder(
             points=(point_coords, point_labels),
             boxes=None,
@@ -488,27 +493,29 @@ class SAM2LoRAFineTuner(nn.Module):
         loss_fn: nn.Module,
         grad_clip: float = 0.0,
         scaler: object = None,
-        second_optimizer: object = None  # Muon+AdamW 双优化器时的第二个
+        second_optimizer: object = None,
+        skip_step: bool = False  # 梯度累积时跳过 optimizer.step()
     ) -> Dict[str, float]:
         """
-        单帧训练步骤（支持 AMP 混合精度 + 双优化器）
+        单帧训练步骤（支持 AMP + 双优化器 + 梯度累积）
 
         Args:
             image: (B, 3, H, W)
             point_coords: (B, N, 2)
             point_labels: (B, N)
             gt_mask: (B, 1, H, W)
-            optimizer: 优化器（或 Muon）
+            optimizer: 优化器
             loss_fn: 损失函数
             grad_clip: 梯度裁剪阈值
             scaler: AMP GradScaler
-            second_optimizer: 第二个优化器（AdamW，仅双优化器模式）
+            second_optimizer: 双优化器时的第二个
+            skip_step: True时只累积梯度不更新参数（梯度累积用）
 
         Returns:
             {'loss': ..., 'valid': True}
         """
-        # 单优化器时清零；双优化器时由调用方清零
-        if second_optimizer is None:
+        # 单优化器 + 非累积模式时清零；双优化器/累积模式由调用方清零
+        if second_optimizer is None and not skip_step:
             optimizer.zero_grad()
 
         # 前向传播（AMP autocast）
@@ -523,6 +530,7 @@ class SAM2LoRAFineTuner(nn.Module):
             else:
                 pred_masks = low_res_masks
 
+            # 梯度累积时除以累积步数
             loss = loss_fn(pred_masks, gt_mask)
 
         # 反向传播
@@ -530,6 +538,10 @@ class SAM2LoRAFineTuner(nn.Module):
             scaler.scale(loss).backward()
         else:
             loss.backward()
+
+        # 梯度累积时跳过参数更新
+        if skip_step:
+            return {'loss': loss.item(), 'valid': True}
 
         # 梯度裁剪
         if grad_clip > 0:
