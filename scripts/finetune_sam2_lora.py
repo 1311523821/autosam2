@@ -129,6 +129,74 @@ def apply_augmentation(batch_frames):
     return batch_frames
 
 
+def load_video_frames_raw(video_folder, target_label, image_size):
+    """加载原始数据（存uint8节省内存，后续convert_to_tensor转float32）"""
+    img_files = sorted([f for f in os.listdir(video_folder)
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+    frames = []
+
+    for img_file in img_files:
+        img_path = os.path.join(video_folder, img_file)
+        json_name = os.path.splitext(img_file)[0] + '.json'
+        json_path = os.path.join(video_folder, json_name)
+
+        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            continue
+
+        h, w = img.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                for s in data.get('shapes', []):
+                    if s['label'] == target_label:
+                        points = np.array(s['points'], dtype=np.float32)
+                        cv2.fillPoly(mask, [points.astype(np.int32)], 1)
+            except Exception:
+                continue
+
+        if mask.sum() == 0:
+            continue
+
+        center = get_mask_center(torch.from_numpy(mask))
+        if center is None:
+            continue
+
+        # 存 uint8（省内存）
+        img_resized = cv2.resize(img, (image_size, image_size))
+        mask_resized = cv2.resize(mask, (image_size, image_size), interpolation=cv2.INTER_NEAREST)
+        scale_x = image_size / w
+        scale_y = image_size / h
+
+        frames.append({
+            'img_uint8': img_resized,  # (H,W) uint8
+            'mask_uint8': mask_resized,  # (H,W) uint8
+            'point': np.array([center[0] * scale_x, center[1] * scale_y], dtype=np.float32),
+            'point_label': np.array([1], dtype=np.int64),
+        })
+
+    return frames
+
+
+def convert_to_tensor(frame):
+    """uint8 → float32 tensor，应用ImageNet归一化"""
+    img_t = torch.from_numpy(frame['img_uint8']).float() / 255.0
+    img_t = img_t.unsqueeze(0).expand(3, -1, -1)
+    img_mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    img_std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    img_t = (img_t - img_mean) / img_std
+
+    return {
+        'image': img_t,
+        'point': frame['point'].copy(),
+        'point_label': frame['point_label'].copy(),
+        'gt_mask': torch.from_numpy(frame['mask_uint8']).float().unsqueeze(0),
+    }
+
+
 def load_video_frames(video_folder, target_label, image_size):
     """
     加载单个视频的所有有效帧（按需加载，避免OOM）
@@ -232,7 +300,8 @@ def validate(model, test_folders, data_root, target_label, image_size, loss_fn, 
             if not os.path.isdir(folder_path):
                 continue
 
-            video_frames = val_all_frames.get(folder, [])
+            raw_frames = val_cache.get(folder, [])
+            video_frames = [convert_to_tensor(f) for f in raw_frames] if raw_frames else []
             if not video_frames:
                 continue
 
@@ -305,31 +374,37 @@ def main():
     print(f"LoRA秩: {args.lora_rank}")
     print(f"图像大小: {args.image_size}")
 
-    # 预加载训练帧到内存（避免每epoch重复磁盘IO）
-    print("\n预加载训练数据...")
-    train_all_frames = {}  # {folder: [frames]}
+    print(f"训练视频: {len(train_folders)}")
+    print(f"验证视频: {len(test_folders)}")
+    print(f"学习率: {args.lr}")
+    print(f"LoRA秩: {args.lora_rank}")
+    print(f"图像大小: {args.image_size}")
+
+    # 预加载训练帧（存uint8节省内存，每epoch转float32）
+    print("\n预加载训练数据（uint8格式，节省内存）...")
+    train_cache = {}  # {folder: [(img_uint8, point, point_label, mask_uint8), ...]}
     train_total = 0
     for folder in tqdm(train_folders, desc="加载训练帧"):
         folder_path = os.path.join(args.data_root, folder)
         if not os.path.isdir(folder_path):
             continue
-        frames = load_video_frames(folder_path, args.target_label, args.image_size)
+        frames = load_video_frames_raw(folder_path, args.target_label, args.image_size)
         if frames:
-            train_all_frames[folder] = frames
+            train_cache[folder] = frames
             train_total += len(frames)
-    print(f"训练帧总数: {train_total}")
+    print(f"训练帧总数: {train_total} (~{train_total*1024*1024*1.5/1e9:.1f}GB uint8)")
 
     # 预加载验证帧
     print("预加载验证数据...")
-    val_all_frames = {}
+    val_cache = {}
     val_total = 0
     for folder in tqdm(test_folders, desc="加载验证帧"):
         folder_path = os.path.join(args.data_root, folder)
         if not os.path.isdir(folder_path):
             continue
-        frames = load_video_frames(folder_path, args.target_label, args.image_size)
+        frames = load_video_frames_raw(folder_path, args.target_label, args.image_size)
         if frames:
-            val_all_frames[folder] = frames
+            val_cache[folder] = frames
             val_total += len(frames)
     print(f"验证帧总数: {val_total}")
 
@@ -440,11 +515,12 @@ def main():
                 continue
 
             try:
-                video_frames = train_all_frames.get(folder, [])  # 使用缓存
-                if not video_frames:
+                raw_frames = train_cache.get(folder, [])
+                if not raw_frames:
                     continue
 
-                # 视频内打乱
+                # uint8 → float32 tensor + 视频内打乱
+                video_frames = [convert_to_tensor(f) for f in raw_frames]
                 np.random.shuffle(video_frames)
 
                 # 批次处理：batch_size 帧拼成一个 tensor
