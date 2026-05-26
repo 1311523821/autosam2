@@ -38,9 +38,9 @@ from utils.heatmap import get_mask_center
 def parse_args():
     parser = argparse.ArgumentParser(description='SAM 2 LoRA 微调训练')
     parser.add_argument('--sam2-config', type=str,
-                        default='sam2_hiera_l.yaml')  # SAM2 Large（最佳性能）
+                        default='sam2_hiera_t.yaml')  # SAM2 Tiny（快速迭代）
     parser.add_argument('--sam2-ckpt', type=str,
-                        default='checkpoints/sam2.1_hiera_large.pt')
+                        default='checkpoints/sam2.1_hiera_tiny.pt')
     parser.add_argument('--data-root', type=str, default='/root/DataBscan')
     parser.add_argument('--train-list', type=str, default='/root/e2e/train1.txt')
     parser.add_argument('--test-list', type=str, default='/root/e2e/test1.txt')
@@ -59,8 +59,8 @@ def parse_args():
                         help='分割损失函数: dice 或 tversky (对小目标更友好)')
     parser.add_argument('--image-size', type=int, default=1024,
                         help='训练图像分辨率（必须为1024，SAM2的内部分辨率硬编码）')
-    parser.add_argument('--batch-size', type=int, default=3,
-                        help='批大小（Large: 3=64%显存, 4=OOM; Tiny: 可设8+）')
+    parser.add_argument('--batch-size', type=int, default=8,
+                        help='批大小（Tiny建议8; Large建议3）')
     parser.add_argument('--grad-accum', type=int, default=8,
                         help='梯度累积步数（模拟batch_size*8，提升GPU利用率）')
     parser.add_argument('--save-every', type=int, default=10)
