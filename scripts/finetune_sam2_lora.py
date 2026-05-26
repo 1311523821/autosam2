@@ -286,7 +286,7 @@ def compute_dice(pred_prob, gt_mask, threshold=0.5):
         return 1.0
     return (2 * intersection / total).item()
 
-def validate(model, test_folders, data_root, target_label, image_size, loss_fn, device):
+def validate(model, test_folders, data_root, target_label, image_size, loss_fn, device, val_cache):
     """验证：计算单帧 loss、IoU、Dice（不跑端到端视频跟踪）"""
     model.eval()
     total_loss = 0.0
@@ -525,6 +525,7 @@ def main():
 
                 # 批次处理：batch_size 帧拼成一个 tensor
                 batch_frames = []
+                accum_count = 0
 
                 for i, frame_data in enumerate(video_frames):
                     batch_frames.append(frame_data)
@@ -593,7 +594,7 @@ def main():
 
         if do_validate:
             val_metrics = validate(model, test_folders, args.data_root,
-                                  args.target_label, args.image_size, loss_fn, args.device)
+                                  args.target_label, args.image_size, loss_fn, args.device, val_cache)
             history['val_loss'].append(val_metrics['loss'])
             history['val_iou'].append(val_metrics['iou'])
             history['val_dice'].append(val_metrics['dice'])
