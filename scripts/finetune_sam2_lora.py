@@ -66,8 +66,8 @@ def parse_args():
     parser.add_argument('--save-every', type=int, default=10)
     parser.add_argument('--val-every', type=int, default=5,
                         help='每N个epoch验证一次（单帧loss，非端到端指标）')
-    parser.add_argument('--patience', type=int, default=15,
-                        help='早停耐心值：连续N轮验证loss不降则停止（0=禁用）')
+    parser.add_argument('--patience', type=int, default=5,
+                        help='早停耐心值：连续N次验证不降则停止（×val_every=实际epoch数, 0=禁用）')
     parser.add_argument('--warmup-epochs', type=int, default=3,
                         help='学习率预热轮数（逐步从0升到目标lr）')
     parser.add_argument('--amp', action='store_true', default=True,
