@@ -114,15 +114,17 @@ def apply_augmentation(batch_frames):
         for f in batch_frames:
             f['image'] = torch.clamp((f['image'] * brightness + (1 - brightness) * 0.5) * contrast, -3, 3)
 
-    if np.random.random() < 0.3:
+    if np.random.random() < 0.3 and len(batch_frames) > 0:
         # 小幅度平移（±5% 图像尺寸）
-        shift_x = int(0.05 * np.random.randn() * f['image'].shape[-1])
-        shift_y = int(0.05 * np.random.randn() * f['image'].shape[-2])
+        W_img = batch_frames[0]['image'].shape[-1]
+        H_img = batch_frames[0]['image'].shape[-2]
+        shift_x = int(0.05 * np.random.randn() * W_img)
+        shift_y = int(0.05 * np.random.randn() * H_img)
         for f in batch_frames:
             f['image'] = torch.roll(f['image'], shifts=(shift_y, shift_x), dims=(-2, -1))
             f['gt_mask'] = torch.roll(f['gt_mask'], shifts=(shift_y, shift_x), dims=(-2, -1))
-            f['point'][..., 0] += shift_x
-            f['point'][..., 1] += shift_y
+            f['point'][0] += shift_x
+            f['point'][1] += shift_y
 
     return batch_frames
 
@@ -190,8 +192,8 @@ def load_video_frames(video_folder, target_label, image_size):
 
         frames.append({
             'image': img_tensor,
-            'point': np.array([[[center[0] * scale_x, center[1] * scale_y]]], dtype=np.float32),
-            'point_label': np.array([[1]], dtype=np.int64),
+            'point': np.array([center[0] * scale_x, center[1] * scale_y], dtype=np.float32),
+            'point_label': np.array([1], dtype=np.int64),
             'gt_mask': torch.from_numpy(mask_resized).float().unsqueeze(0)
         })
 
@@ -236,8 +238,8 @@ def validate(model, test_folders, data_root, target_label, image_size, loss_fn, 
 
             for frame_data in video_frames:
                 image = frame_data['image'].unsqueeze(0).to(device)
-                point = torch.from_numpy(frame_data['point']).to(device)
-                point_label = torch.from_numpy(frame_data['point_label']).to(device)
+                point = torch.from_numpy(frame_data['point']).unsqueeze(0).unsqueeze(0).to(device)  # (2,)→(1,1,2)
+                point_label = torch.from_numpy(frame_data['point_label']).unsqueeze(0).to(device)  # (1,)→(1,1)
                 gt_mask = frame_data['gt_mask'].unsqueeze(0).to(device)
 
                 low_res_masks, _ = model.forward_single_frame(image, point, point_label)
@@ -432,8 +434,8 @@ def main():
 
                     # 拼接 batch
                     images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
-                    points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).to(args.device)
-                    point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)
+                    points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).unsqueeze(1).to(args.device)  # (B,2)→(B,1,2)
+                    point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).unsqueeze(1).to(args.device)  # (B,)→(B,1)
                     gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
 
                     # 双优化器时，在每个累积周期开始时清零梯度
