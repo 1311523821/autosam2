@@ -59,8 +59,8 @@ def parse_args():
                         help='分割损失函数: dice 或 tversky (对小目标更友好)')
     parser.add_argument('--image-size', type=int, default=1024,
                         help='训练图像分辨率（必须为1024，SAM2的内部分辨率硬编码）')
-    parser.add_argument('--batch-size', type=int, default=2,
-                        help='批大小（2=安全上限，4会炸显存）')
+    parser.add_argument('--batch-size', type=int, default=3,
+                        help='批大小（Large: 3=64%显存, 4=OOM; Tiny: 可设8+）')
     parser.add_argument('--grad-accum', type=int, default=8,
                         help='梯度累积步数（模拟batch_size*8，提升GPU利用率）')
     parser.add_argument('--save-every', type=int, default=10)
