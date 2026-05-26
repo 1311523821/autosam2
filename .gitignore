@@ -36,6 +36,7 @@ venv/
 
 # Claude Code 配置（含本地设置/令牌）
 .claude/
+.playwright-mcp/
 
 # macOS
 .DS_Store
