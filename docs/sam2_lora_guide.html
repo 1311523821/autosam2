@@ -1,624 +1,692 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SAM 2 LoRA 微调 — 交互式教学课件</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<style>
-:root{--bg:#0a0e14;--card:#12171f;--border:#1e293b;--text:#c9d1d9;--t2:#8b949e;--ac:#58a6ff;--gr:#3fb950;--or:#d2991d;--rd:#f85149;--pu:#a371f7;--pi:#db61a2;--cy:#39c5cf;--code:#0d1117}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;font-size:14px}
-header{background:linear-gradient(135deg,#0a0e14 0%,#141b2d 40%,#0d1525 100%);border-bottom:1px solid var(--border);padding:32px 20px;text-align:center}
-header h1{font-size:2rem;background:linear-gradient(135deg,var(--ac),var(--pu),var(--pi));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:8px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:20px;padding:20px;max-width:1400px;margin:0 auto}
-.grid-full{grid-column:1/-1}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;position:relative;overflow:hidden;margin-bottom:0}
-.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--ac),var(--pu))}
-.card h2{font-size:1.1rem;margin-bottom:16px}
-.card h3{font-size:.95rem;margin:16px 0 8px;color:var(--ac)}
-.control-group{margin-bottom:12px}
-.control-group label{display:block;color:var(--t2);font-size:12px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
-.control-group input[type=range]{width:100%;accent-color:var(--pu)}
-.control-group .value{float:right;color:var(--ac);font-size:13px;font-weight:bold}
-select,button{background:var(--code);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer}
-select:hover,button:hover{border-color:var(--ac)}
-button.primary{background:var(--ac);color:#000;border:none;font-weight:bold}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM 2 LoRA 微调完全指南</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text2: #8b949e;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --orange: #d2991d;
+            --red: #f85149;
+            --purple: #a371f7;
+            --code-bg: #1c2128;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            font-size: 15px;
+        }
 
-/* Tabs */
-.tab-bar{display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--border);overflow-x:auto}
-.tab-btn{padding:8px 16px;cursor:pointer;border:none;background:none;color:var(--t2);font-size:13px;border-bottom:2px solid transparent;transition:.2s;white-space:nowrap}
-.tab-btn.active{color:var(--ac);border-bottom-color:var(--ac)}
-.tab-btn:hover{color:var(--text)}
-.tab-panel{display:none}
-.tab-panel.active{display:block}
+        /* Header */
+        header {
+            background: linear-gradient(135deg, #0d1117 0%, #1a2332 50%, #0d2137 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 60px 20px;
+            text-align: center;
+        }
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 12px;
+        }
+        header p { color: var(--text2); font-size: 1.1rem; max-width: 700px; margin: 0 auto; }
 
-/* KaTeX */
-.katex-display{margin:.8em 0!important;text-align:left!important}
-.katex{font-size:1.05em!important}
+        /* Container */
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
 
-/* Matrix viz */
-.matrix-grid{display:inline-grid;gap:1px;font-family:'Courier New',monospace;font-size:11px;margin:4px}
-.matrix-grid .cell{width:24px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:2px;transition:background .3s}
-.matrix-grid .cell.zero{background:#1e293b;color:var(--t2)}
-.matrix-grid .cell.nonzero{background:#a371f766;color:#e2d1ff}
-.matrix-grid .cell.highlight{background:#58a6ff88;color:#fff;font-weight:bold}
-.matrix-label{font-family:'Courier New',monospace;font-size:12px;color:var(--ac);margin:4px 0 2px;text-align:center}
-.matrix-container{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;margin:12px 0}
-.matrix-arrow{font-size:20px;color:var(--t2)}
+        /* Section */
+        .section {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin: 28px 0;
+            padding: 32px;
+        }
+        .section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .section h3 {
+            font-size: 1.15rem;
+            margin: 24px 0 12px;
+            color: var(--accent);
+        }
 
-/* Code panel */
-.code-block{background:var(--code);border:1px solid var(--border);border-radius:8px;padding:16px;overflow-x:auto;font-size:13px;line-height:1.5;margin:8px 0;position:relative}
-.code-block .line{display:flex;transition:background .3s}
-.code-block .line:hover{background:rgba(88,166,255,.05)}
-.code-block .line.highlight{background:rgba(88,166,255,.15);border-left:3px solid var(--ac);padding-left:8px}
-.code-block .ln{color:var(--t2);min-width:30px;text-align:right;padding-right:12px;user-select:none;font-size:11px}
-.code-block .cd{color:var(--text);white-space:pre-wrap}
-.code-block .kw{color:var(--pi)}
-.code-block .cm{color:var(--t2);font-style:italic}
-.code-block .fn{color:var(--ac)}
-.code-block .num{color:var(--or)}
-.code-block .str{color:var(--gr)}
-.code-block .tp{color:var(--cy)}
+        /* Diagrams */
+        .diagram {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 16px 0;
+            padding: 20px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre;
+            color: var(--text);
+        }
+        .diagram .c { color: var(--text2); }
+        .diagram .k { color: var(--accent); }
+        .diagram .g { color: var(--green); }
+        .diagram .o { color: var(--orange); }
+        .diagram .r { color: var(--red); }
+        .diagram .p { color: var(--purple); }
 
-/* Charts */
-.chart-wrap{position:relative;height:260px;margin:8px 0}
+        /* Flow visualization */
+        .flow-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 16px 0;
+        }
+        .flow-box {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 18px;
+            text-align: center;
+            font-size: 13px;
+            min-width: 80px;
+        }
+        .flow-arrow {
+            color: var(--accent);
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .flow-box.frozen { border-color: var(--text2); opacity: 0.5; }
+        .flow-box.lora { border-color: var(--purple); border-width: 2px; }
+        .flow-box.train { border-color: var(--green); border-width: 2px; }
 
-/* Pie */
-.pie-container{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-.pie-legend{display:flex;flex-direction:column;gap:8px;font-size:12px}
-.pie-legend span{display:flex;align-items:center;gap:6px}
-.pie-legend .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+        /* Comparison table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid var(--border);
+            padding: 10px 14px;
+            text-align: left;
+        }
+        th { background: var(--code-bg); font-weight: 600; }
+        td.c1 { color: var(--green); }
+        td.c2 { color: var(--red); }
 
-/* Badge */
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}
-.badge-gr{background:rgba(63,185,80,.2);color:var(--gr)}
-.badge-pu{background:rgba(163,113,247,.2);color:var(--pu)}
-.badge-rd{background:rgba(248,81,73,.2);color:var(--rd)}
-.badge-cy{background:rgba(57,197,207,.2);color:var(--cy)}
-.badge-ac{background:rgba(88,166,255,.2);color:var(--ac)}
+        /* Code blocks */
+        code {
+            background: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: var(--orange);
+        }
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 12px 0;
+        }
+        pre code { background: none; padding: 0; color: var(--text); }
 
-table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0}
-th,td{border:1px solid var(--border);padding:8px 10px;text-align:left}
-th{background:var(--code);font-weight:600;color:var(--t2);font-size:11px;text-transform:uppercase}
+        /* Cards grid */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+        }
+        .info-card {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .info-card h4 { margin-bottom: 8px; }
 
-.formula{background:var(--code);border-radius:6px;padding:12px;margin:8px 0;font-size:13px}
+        /* Warning */
+        .warning {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin: 16px 0;
+        }
+        .warning::before { content: "⚠️ "; }
+        .tip {
+            background: rgba(63, 185, 80, 0.1);
+            border: 1px solid rgba(63, 185, 80, 0.3);
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin: 16px 0;
+        }
+        .tip::before { content: "💡 "; }
 
-.info-box{padding:12px 16px;border-radius:8px;margin:12px 0;font-size:13px}
-.info-box.warn{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3)}
-.info-box.tip{background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3)}
+        /* Step numbers */
+        .step { counter-reset: step-counter; list-style: none; padding: 0; }
+        .step li {
+            counter-increment: step-counter;
+            position: relative;
+            padding: 8px 0 8px 40px;
+            margin: 8px 0;
+        }
+        .step li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 0;
+            top: 6px;
+            width: 28px;
+            height: 28px;
+            line-height: 28px;
+            background: var(--accent);
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            font-size: 13px;
+            font-weight: bold;
+        }
 
-.timeline{display:flex;align-items:center;gap:0;margin:16px 0;flex-wrap:wrap;justify-content:center}
-.timeline-dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:bold;color:#fff;flex-shrink:0}
-.timeline-line{flex:1;min-width:20px;height:2px;background:var(--border)}
-
-.arch-svg{width:100%;height:auto}
-
-footer{text-align:center;padding:24px;color:var(--t2);font-size:12px}
-
-@media(max-width:768px){.grid{grid-template-columns:1fr;padding:10px}.pie-container{flex-direction:column}.matrix-container{flex-direction:column}}
-</style>
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container { padding: 10px; }
+            .section { padding: 20px; }
+            header h1 { font-size: 1.8rem; }
+            .flow-row { flex-direction: column; }
+            .flow-arrow { transform: rotate(90deg); }
+        }
+    </style>
 </head>
 <body>
 
 <header>
-<h1>SAM 2 LoRA 微调 — 交互式教学课件</h1>
-<p>架构可视化 · LoRA 矩阵演示 · 参数推演 · 训练模拟 · 代码剖析 · 公式面板</p>
+    <h1>SAM 2 LoRA 微调完全指南</h1>
+    <p>从零理解如何用 LoRA 微调 SAM 2 处理声呐 B-scan 小目标检测</p>
 </header>
 
-<div class="grid">
+<div class="container">
 
-<!-- ===== MODULE 1: Architecture + LoRA Demo ===== -->
-<div class="card grid-full">
-<div class="tab-bar">
-<button class="tab-btn active" onclick="switchTab('arch',this)">架构总览</button>
-<button class="tab-btn" onclick="switchTab('lora-math',this)">LoRA 矩阵演示</button>
-<button class="tab-btn" onclick="switchTab('params-derive',this)">参数量推演</button>
-<button class="tab-btn" onclick="switchTab('code-panel',this)">代码剖析</button>
+<!-- ==================== Chapter 1: Background ==================== -->
+<div class="section">
+    <h2>1. 为什么要微调 SAM 2？</h2>
+
+    <p>SAM 2 在<strong>自然图像</strong>上预训练。它见过猫、狗、汽车，但<strong>从未见过声呐 B-scan 图像</strong>。</p>
+
+    <div class="diagram">
+<span class="c">┌─────────────────────────────────────────────────────────────┐</span>
+<span class="c">│                    SAM 2 预训练数据                         │</span>
+<span class="c">│                                                             │</span>
+<span class="c">│    🌳  🐕  🚗  👤  🍎  🏠  🚲  ...                        │</span>
+<span class="c">│    (自然图像：彩色、纹理丰富、物体清晰)                      │</span>
+<span class="c">│                                                             │</span>
+<span class="c">│                    ↓  直接使用  ↓                           │</span>
+<span class="c">│                                                             │</span>
+<span class="c">│    声呐 B-scan 图像：灰度、噪点多、目标微小                 │</span>
+<span class="c">│                                                             │</span>
+<span class="c">│    ╔══════════════════════════════════╗                      │</span>
+<span class="c">│    ║  ░░●░░░░░░░░░░░░░░░░░░░░░░░░░░ ║  结果：              │</span>
+<span class="c">│    ║  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ║  Mask Decoder       │</span>
+<span class="c">│    ║  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░● ║  把目标当噪声       │</span>
+<span class="c">│    ║  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ║  Image Encoder      │</span>
+<span class="c">│    ║  ░░░░░░░░░░░░●░░░░░░░░░░░░░░░░ ║  特征提取失败       │</span>
+<span class="c">│    ╚══════════════════════════════════╝                      │</span>
+<span class="c">│                                                             │</span>
+<span class="c">│    问题：Image Encoder 把微弱目标当作"无意义的噪声"过滤了    │</span>
+<span class="c">│    后果：Decoder 拿到的特征里根本没有目标信息                   │</span>
+<span class="c">└─────────────────────────────────────────────────────────────┘</span>
+    </div>
+
+    <div class="warning">
+        <strong>核心矛盾</strong>：冻结的 Image Encoder 不认识声呐图像中的目标，它输出给 Decoder 的是"垃圾特征"。Decoder 再强也无法从垃圾特征中画出正确的 Mask。
+    </div>
 </div>
 
-<!-- Panel 1: Architecture -->
-<div class="tab-panel active" id="panel-arch">
-<h2 style="font-size:1rem;color:var(--t2);margin-bottom:12px;">SAM 2 完整架构 & LoRA 注入位置</h2>
-<div style="overflow-x:auto">
-<svg viewBox="0 0 880 370" class="arch-svg">
-<defs>
-<marker id="ah" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto">
-<polygon points="0 0,10 3.5,0 7" fill="#8b949e"/>
-</marker>
-<linearGradient id="g-enc" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#a371f7" stop-opacity=".25"/><stop offset="100%" stop-color="#a371f7" stop-opacity=".04"/></linearGradient>
-<linearGradient id="g-dec" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3fb950" stop-opacity=".25"/><stop offset="100%" stop-color="#3fb950" stop-opacity=".04"/></linearGradient>
-</defs>
+<!-- ==================== Chapter 2: The API Trap ==================== -->
+<div class="section">
+    <h2>2. 第一个坑：SAM 2 的 API 陷阱</h2>
 
-<!-- Image Encoder -->
-<rect x="20" y="15" width="210" height="180" rx="10" fill="url(#g-enc)" stroke="#a371f7" stroke-width="2"/>
-<text x="125" y="42" fill="#a371f7" font-size="13" font-weight="bold" text-anchor="middle">Image Encoder</text>
-<text x="125" y="58" fill="#8b949e" font-size="10" text-anchor="middle">Hiera ViT · 12 Blocks · 4 Stages</text>
+    <p>Meta 提供了两个加载 SAM 2 的方式，但<strong>只有第一个支持训练</strong>：</p>
 
-<!-- Stage boxes -->
-<rect x="35" y="72" width="42" height="22" rx="4" fill="#8b949e" opacity=".3"/>
-<text x="56" y="87" fill="#8b949e" font-size="9" text-anchor="middle">S0❄️</text>
-<rect x="82" y="72" width="42" height="22" rx="4" fill="#a371f7" opacity=".2" stroke="#a371f7" stroke-width="1.5"/>
-<text x="103" y="87" fill="#a371f7" font-size="9" font-weight="bold" text-anchor="middle">S1⚡</text>
-<rect x="129" y="72" width="42" height="22" rx="4" fill="#a371f7" opacity=".35" stroke="#a371f7" stroke-width="2"/>
-<text x="150" y="87" fill="#a371f7" font-size="9" font-weight="bold" text-anchor="middle">S2⚡</text>
-<rect x="176" y="72" width="42" height="22" rx="4" fill="#a371f7" opacity=".35" stroke="#a371f7" stroke-width="2"/>
-<text x="197" y="87" fill="#a371f7" font-size="9" font-weight="bold" text-anchor="middle">S3⚡</text>
+    <table>
+        <tr>
+            <th></th>
+            <th>build_sam2 (底层模型)</th>
+            <th>build_sam2_video_predictor (推理 API)</th>
+        </tr>
+        <tr>
+            <td>类型</td>
+            <td class="c1">普通 nn.Module</td>
+            <td class="c2">推理专用 API</td>
+        </tr>
+        <tr>
+            <td>梯度支持</td>
+            <td class="c1">✅ 完全支持 backward()</td>
+            <td class="c2">❌ 所有方法有 @torch.inference_mode()</td>
+        </tr>
+        <tr>
+            <td>能否训练</td>
+            <td class="c1">✅ 可以</td>
+            <td class="c2">❌ 无法训练</td>
+        </tr>
+        <tr>
+            <td>能否推理</td>
+            <td class="c1">✅ 可以（加载微调权重后）</td>
+            <td class="c2">✅ 可以</td>
+        </tr>
+    </table>
 
-<text x="125" y="120" fill="#8b949e" font-size="9" text-anchor="middle">Blocks: 1+2+7+2</text>
-<text x="125" y="135" fill="#a371f7" font-size="9" font-weight="bold" text-anchor="middle">LoRA 注入: Stage 2+3 (20 layers)</text>
-<text x="125" y="150" fill="#8b949e" font-size="9" text-anchor="middle">LoRA 参数: 0.11M / 39M (0.3%)</text>
+<pre><code><span class="c"># ❌ 错误做法：用 Video Predictor API 训练</span>
+from sam2.build_sam import build_sam2_video_predictor
+predictor = build_sam2_video_predictor(config, ckpt)
+<span class="c"># propagate_in_video() 有 @torch.inference_mode() 装饰器</span>
+<span class="c"># 无法计算梯度，loss.backward() 会失败！</span>
 
-<!-- FPN Neck -->
-<rect x="20" y="198" width="210" height="24" rx="6" fill="#8b949e" opacity=".12" stroke="#8b949e" stroke-width="1"/>
-<text x="125" y="214" fill="#8b949e" font-size="10" text-anchor="middle">FPN Neck (冻结)</text>
+<span class="c"># ✅ 正确做法：用底层 Base 模型训练</span>
+from sam2.build_sam import build_sam2
+model = build_sam2(config, ckpt)
+<span class="c"># 这是一个标准 nn.Module，完全支持梯度计算</span>
+<span class="c"># loss.backward() 正常工作！</span>
 
-<!-- Arrows -->
-<line x1="230" y1="105" x2="280" y2="105" stroke="#8b949e" stroke-width="1" marker-end="url(#ah)"/>
-<line x1="230" y1="210" x2="280" y2="280" stroke="#8b949e" stroke-width="1" marker-end="url(#ah)"/>
-
-<!-- Prompt Encoder -->
-<rect x="290" y="55" width="170" height="55" rx="8" fill="#8b949e" opacity=".08" stroke="#8b949e" stroke-width="1.5"/>
-<text x="375" y="78" fill="#c9d1d9" font-size="12" text-anchor="middle">Prompt Encoder</text>
-<text x="375" y="95" fill="#8b949e" font-size="9" text-anchor="middle">冻结 ❄️ · 0.1M</text>
-
-<!-- Memory Attention -->
-<rect x="290" y="130" width="170" height="55" rx="8" fill="#8b949e" opacity=".08" stroke="#8b949e" stroke-width="1.5"/>
-<text x="375" y="153" fill="#c9d1d9" font-size="12" text-anchor="middle">Memory Attn + Enc</text>
-<text x="375" y="170" fill="#8b949e" font-size="9" text-anchor="middle">冻结 ❄️ · ~3M</text>
-
-<!-- Mask Decoder -->
-<rect x="290" y="245" width="220" height="85" rx="10" fill="url(#g-dec)" stroke="#3fb950" stroke-width="2"/>
-<text x="400" y="275" fill="#3fb950" font-size="13" font-weight="bold" text-anchor="middle">Mask Decoder</text>
-<text x="400" y="295" fill="#3fb950" font-size="9" font-weight="bold" text-anchor="middle">全量训练 🔥 · 4.22M</text>
-<text x="400" y="312" fill="#8b949e" font-size="9" text-anchor="middle">TwoWayTransformer + Dynamic Head</text>
-
-<!-- Output -->
-<line x1="510" y1="290" x2="550" y2="290" stroke="#8b949e" stroke-width="1" marker-end="url(#ah)"/>
-<rect x="560" y="260" width="120" height="55" rx="8" fill="#0d1117" stroke="#58a6ff" stroke-width="1.5"/>
-<text x="620" y="285" fill="#58a6ff" font-size="12" font-weight="bold" text-anchor="middle">Mask</text>
-<text x="620" y="302" fill="#8b949e" font-size="9" text-anchor="middle">(B,1,256,256)</text>
-
-<!-- Input -->
-<rect x="20" y="330" width="210" height="28" rx="6" fill="#0d1117" stroke="#1e293b" stroke-width="1"/>
-<text x="125" y="348" fill="#8b949e" font-size="10" text-anchor="middle">输入: B-scan 灰度图 1024² (GT点→prompt)</text>
-<line x1="125" y1="330" x2="125" y2="195" stroke="#a371f7" stroke-width="1" stroke-dasharray="3,3"/>
-
-<!-- Legend -->
-<text x="640" y="340" fill="#a371f7" font-size="9" font-weight="bold">⚡ LoRA 微调 · ❄️ 冻结 · 🔥 全量训练</text>
-</svg>
-</div>
-<table style="margin-top:12px">
-<tr><th>模块</th><th>参数量</th><th>微调策略</th><th>原因</th></tr>
-<tr><td>Image Encoder</td><td>~9M</td><td><span class="badge badge-pu">LoRA r=4</span></td><td>需适应雷达域，LoRA防过拟合</td></tr>
-<tr><td>Mask Decoder</td><td>4.22M</td><td><span class="badge badge-gr">全量训练</span></td><td>分割头需大幅调整边界特征</td></tr>
-<tr><td>Memory Attn/Enc</td><td>~3M</td><td><span class="badge badge-rd">冻结</span></td><td>时序跟踪能力通用</td></tr>
-<tr><td>Prompt Encoder</td><td>0.1M</td><td><span class="badge badge-rd">冻结</span></td><td>点坐标编码无需改变</td></tr>
-</table>
+<span class="c"># ✅ 训练完成后，用 Video Predictor 推理</span>
+predictor = build_sam2_video_predictor(config, finetuned_ckpt)
+predictor.propagate_in_video(state)  # 正常工作！</code></pre>
 </div>
 
-<!-- Panel 2: LoRA Matrix Demo -->
-<div class="tab-panel" id="panel-lora-math">
-<h2 style="font-size:1rem;color:var(--t2);margin-bottom:12px;">LoRA 矩阵乘法动态演示</h2>
-<div class="control-group" style="display:flex;gap:24px;flex-wrap:wrap;">
-<div>
-<label>输入维度 d <span class="value" id="lora-dim-val">96</span></label>
-<input type="range" id="lora-dim" min="32" max="384" step="32" value="96" oninput="updateLoraDemo()">
-</div>
-<div>
-<label>输出维度 d′ <span class="value" id="lora-dim2-val">288</span></label>
-<input type="range" id="lora-dim2" min="32" max="768" step="32" value="288" oninput="updateLoraDemo()">
-</div>
-<div>
-<label>LoRA 秩 r <span class="value" id="lora-demo-r-val">4</span></label>
-<input type="range" id="lora-demo-r" min="1" max="16" value="4" oninput="updateLoraDemo()">
-</div>
-<div>
-<label>LoRA Alpha <span class="value" id="lora-demo-alpha-val">8</span></label>
-<input type="range" id="lora-demo-alpha" min="1" max="32" value="8" oninput="updateLoraDemo()">
-</div>
-</div>
+<!-- ==================== Chapter 3: What is LoRA ==================== -->
+<div class="section">
+    <h2>3. 什么是 LoRA</h2>
 
-<div class="formula" style="text-align:center;font-size:14px">
-<h3>矩阵分解可视化</h3>
-</div>
+    <h3>3.1 传统微调 vs LoRA 微调</h3>
 
-<div class="matrix-container">
-<div style="text-align:center">
-<div class="matrix-label">输入 x (1×<span id="demo-d">96</span>)</div>
-<div id="matrix-x" class="matrix-grid" style="grid-template-columns:repeat(32,1fr)"></div>
-</div>
-<div class="matrix-arrow">×</div>
-<div style="text-align:center">
-<div class="matrix-label">W<sub>orig</sub> (<span id="demo-d">96</span>×<span id="demo-d2">288</span>) ❄️</div>
-<div id="matrix-w" class="matrix-grid" style="grid-template-columns:repeat(24,1fr);opacity:.4"></div>
-</div>
-<div class="matrix-arrow">+</div>
-<div style="text-align:center">
-<div class="matrix-label">A<sup>T</sup> (<span id="demo-d">96</span>×<span id="demo-r">4</span>) ⚡</div>
-<div id="matrix-a" class="matrix-grid" style="grid-template-columns:repeat(4,1fr)"></div>
-</div>
-<div class="matrix-arrow">×</div>
-<div style="text-align:center">
-<div class="matrix-label">B<sup>T</sup> (<span id="demo-r">4</span>×<span id="demo-d2">288</span>) ⚡</div>
-<div id="matrix-b" class="matrix-grid" style="grid-template-columns:repeat(12,1fr)"></div>
-</div>
-<div class="matrix-arrow">×</div>
-<div style="text-align:center">
-<div class="matrix-label">α/r = <span id="demo-scale">2.0</span></div>
-<div style="font-size:11px;color:var(--t2);margin-top:4px" id="demo-params"></div>
-</div>
-</div>
+    <div class="card-grid">
+        <div class="info-card">
+            <h4>传统全参数微调</h4>
+            <p>直接修改模型<strong>所有</strong>参数。</p>
+            <p>❌ 参数量巨大（SAM 2 Tiny 约 39M）</p>
+            <p>❌ 显存开销大</p>
+            <p>❌ 容易过拟合（数据少时）</p>
+            <p>❌ 需要保存完整模型副本</p>
+        </div>
+        <div class="info-card" style="border-color: var(--purple);">
+            <h4 style="color: var(--purple);">LoRA 微调</h4>
+            <p>冻结原始权重，只训练<strong>低秩旁路矩阵</strong>。</p>
+            <p>✅ 可训练参数仅 ~0.1M（0.3%）</p>
+            <p>✅ 显存几乎不增加</p>
+            <p>✅ 防过拟合（参数少 + 低秩约束）</p>
+            <p>✅ 权重可直接合并到原模型</p>
+        </div>
+    </div>
 
-<div class="info-box tip">
-<strong>关键洞察</strong>：原始 W 是 d×d′ = <span id="insight-full"></span> 个参数，LoRA 只用 r×(d+d′) = <span id="insight-lora"></span> 个参数（<span id="insight-pct"></span>%）。秩 r 控制了"能学习多少种独立的变化方向"。
-</div>
+    <h3>3.2 LoRA 的数学原理</h3>
+
+    <p>原始线性层的计算：</p>
+    <div class="diagram">
+<span class="c">    输入 x (d维)  ──→  [ W (d×d) ]  ──→  输出 h (d维)</span>
+<span class="c">                        ↑</span>
+<span class="c">                    39M 参数，全部冻结</span>
+    </div>
+
+    <p>LoRA 在<strong>旁边</strong>加一条低秩路径：</p>
+
+    <div class="diagram">
+<span class="c">                       ┌─ 原始路径（冻结） ─┐</span>
+<span class="c">    输入 x  ──→  ─────┤  W·x (d×d矩阵乘)  ├──────→  输出 h + Δh</span>
+<span class="c">                  │                        │</span>
+<span class="c">                  └─ LoRA 路径（可训练） ─┘</span>
+<span class="c">                       A (r×d) → B (d×r)</span>
+<span class="c">                       ↑              ↑</span>
+<span class="c">                    秩 r=4        秩 r=4</span>
+<span class="c">                   参数: 4d      参数: 4d</span>
+<span class="c">                   总共: 8d (vs 原始 d²)</span>
+
+<span class="k">    公式：output = W·x + (x @ A^T @ B^T) × α/r</span>
+<span class="k">                     ↑                     ↑</span>
+<span class="k">                  原始输出             LoRA 修正量</span>
+    </div>
+
+    <p><strong>为什么秩 r=4 就够了？</strong></p>
+    <p>W 的改变量 ΔW 虽然维度大（d×d），但 <strong>ΔW 的本质信息量很低</strong>——它只需要描述"声呐图像 vs 自然图像"的差异。这种差异可以用低秩矩阵近似。r=4 意味着只用 4 个独立方向就足够表达这种差异。</p>
 </div>
 
-<!-- Panel 3: Parameter Derivation -->
-<div class="tab-panel" id="panel-params-derive">
-<h2 style="font-size:1rem;color:var(--t2);margin-bottom:12px;">参数量推演公式计算器</h2>
+<!-- ==================== Chapter 4: Architecture ==================== -->
+<div class="section">
+    <h2>4. SAM 2 内部结构：LoRA 注入哪里</h2>
 
-<div class="control-group">
-<label>LoRA 秩 r <span class="value" id="derive-r-val">4</span></label>
-<input type="range" id="derive-r" min="1" max="16" value="4" oninput="updateDerivation()">
-</div>
-<div class="control-group">
-<label>注入范围</label>
-<select id="derive-stages" onchange="updateDerivation()">
-<option value="23">Stage 2 + 3 (推荐)</option>
-<option value="123">Stage 1 + 2 + 3</option>
-<option value="3">仅 Stage 3</option>
-</select>
-</div>
+    <h3>4.1 SAM 2 的模块组成</h3>
 
-<div class="formula" style="font-size:14px">
-<div id="derive-step1"></div>
-<div id="derive-step2" style="margin-top:8px"></div>
-<div id="derive-step3" style="margin-top:8px"></div>
-<div id="derive-step4" style="margin-top:12px;font-weight:bold;color:var(--ac)"></div>
-</div>
+    <div class="diagram">
+<span class="c">    SAM 2 Base Model (build_sam2)</span>
+<span class="c">    ╔═══════════════════════════════════════════════════╗</span>
+<span class="c">    ║                                                   ║</span>
+<span class="c">    ║  ┌─────────────────┐    ┌──────────────────────┐ ║</span>
+<span class="c">    ║  │  Image Encoder  │    │  Memory Attention    │ ║</span>
+<span class="c">    ║  │  (Hiera ViT)    │    │  (帧间特征匹配)      │ ║</span>
+<span class="c">    ║  │                 │    │                      │ ║</span>
+<span class="c">    ║  │  12 个 Blocks   │    │  状态: 冻结 ❄️       │ ║</span>
+<span class="c">    ║  │  分 4 个 Stages │    └──────────────────────┘ ║</span>
+<span class="c">    ║  │                 │                             ║</span>
+<span class="c">    ║  │  Stage 0: 1块   │                             ║</span>
+<span class="p">    ║  │  Stage 1: 2块 ⚡ │                             ║</span>
+<span class="p">    ║  │  Stage 2: 7块 ⚡ │  ← LoRA 注入在这里         ║</span>
+<span class="p">    ║  │  Stage 3: 2块 ⚡ │                             ║</span>
+<span class="c">    ║  │                 │                             ║</span>
+<span class="c">    ║  └────────┬────────┘                             ║</span>
+<span class="c">    ║           ↓                                       ║</span>
+<span class="c">    ║  ┌─────────────────┐    ┌──────────────────────┐ ║</span>
+<span class="c">    ║  │ Prompt Encoder  │    │  Mask Decoder        │ ║</span>
+<span class="c">    ║  │ (点坐标→嵌入)   │    │  (生成分割mask)      │ ║</span>
+<span class="c">    ║  │                 │    │                      │ ║</span>
+<span class="c">    ║  │ 状态: 冻结 ❄️   │    │  状态: 全量训练 🔥   │ ║</span>
+<span class="c">    ║  └─────────────────┘    └──────────────────────┘ ║</span>
+<span class="c">    ║                                                   ║</span>
+<span class="c">    ╚═══════════════════════════════════════════════════╝</span>
 
-<div class="pie-container" style="margin-top:16px">
-<canvas id="derive-pie" width="200" height="200" style="width:200px;height:200px"></canvas>
-<div class="pie-legend">
-<span><span class="dot" style="background:#a371f7"></span> LoRA 可训练: <strong id="derive-lora">0.09M</strong></span>
-<span><span class="dot" style="background:#3fb950"></span> Mask Decoder: <strong>4.22M</strong></span>
-<span><span class="dot" style="background:#30363d"></span> 冻结: <strong id="derive-frozen">34.73M</strong></span>
-<span style="margin-top:6px;color:var(--ac)">总可训练: <strong id="derive-total">4.31M</strong></span>
-</div>
-</div>
-</div>
+<span class="c">    ❄️ 冻结 = 参数不更新，保持预训练知识</span>
+<span class="p">    ⚡ 代表 LoRA 微调，仅训练低秩旁路</span>
+<span class="g">    🔥 全量微调 = 所有参数可更新</span>
+    </div>
 
-<!-- Panel 4: Code Analysis -->
-<div class="tab-panel" id="panel-code-panel">
-<h2 style="font-size:1rem;color:var(--t2);margin-bottom:12px;">逐行代码剖析 — LoRALinear 实现</h2>
-<div class="code-block" id="code-lora"></div>
-<div style="font-size:12px;color:var(--t2);margin-top:8px" id="code-note">鼠标悬停代码行查看说明</div>
-</div>
-</div>
+    <h3>4.2 Hiera ViT 内部：一个 Block 的结构</h3>
 
-<!-- ===== MODULE 2: Training Simulator ===== -->
-<div class="card">
-<h2>训练过程模拟器</h2>
-<div class="control-group" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
-<select id="sim-loss" onchange="runSim()"><option value="tversky">Tversky (α=0.7)</option><option value="dice">Dice</option><option value="focal">Focal (γ=2)</option></select>
-<select id="sim-aug" onchange="runSim()"><option value="on">数据增强: 开</option><option value="off">数据增强: 关</option></select>
-<select id="sim-opt" onchange="runSim()"><option value="muon">Muon+AdamW</option><option value="adam">AdamW</option></select>
-<button class="primary" onclick="runSim()">重新模拟</button>
-</div>
-<div class="chart-wrap"><canvas id="lossCh"></canvas></div>
-<div class="chart-wrap"><canvas id="iouCh"></canvas></div>
-</div>
+    <div class="diagram">
+<span class="c">    ┌──────────────── Block ──────────────────────┐</span>
+<span class="c">    │                                              │</span>
+<span class="c">    │         输入 x (shape: B, H×W, C)             │</span>
+<span class="c">    │              ↓                               │</span>
+<span class="c">    │  ┌────────────────────────────┐              │</span>
+<span class="c">    │  │  MultiScaleAttention (attn)│              │</span>
+<span class="c">    │  │                            │              │</span>
+<span class="p">    │  │  ┌──────┐   ┌───────────┐  │              │</span>
+<span class="c">    │  │  │ qkv  │──→│   proj    │  │ ← LoRA注入  │</span>
+<span class="c">    │  │  │Linear │   │  Linear   │  │              │</span>
+<span class="c">    │  │  └──────┘   └───────────┘  │              │</span>
+<span class="c">    │  └────────────────────────────┘              │</span>
+<span class="c">    │              ↓                               │</span>
+<span class="c">    │  ┌────────────────────────────┐              │</span>
+<span class="c">    │  │  MLP                       │              │</span>
+<span class="c">    │  │                            │              │</span>
+<span class="c">    │  │  Linear(96→384) → Linear(384→96)          │</span>
+<span class="c">    │  │       ↑                  ↑                │</span>
+<span class="p">    │  │    也可注入LoRA       也可注入LoRA        │</span>
+<span class="c">    │  └────────────────────────────┘              │</span>
+<span class="c">    │                                              │</span>
+<span class="c">    └──────────────────────────────────────────────┘</span>
 
-<!-- ===== MODULE 3: Loss Formula Panel ===== -->
-<div class="card">
-<h2>损失函数面板</h2>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
-<div>
-<h3><span class="badge badge-pu">Tversky Loss</span></h3>
-<div class="formula"><div id="eq-tversky"></div></div>
-<div class="control-group"><label>α (漏检权重) <span class="value" id="tv-a-v">0.70</span></label><input type="range" id="tv-a" min="0.5" max="0.9" step=".05" value=".7" oninput="updateLoss()"></div>
-<div class="control-group"><label>β (误检权重) <span class="value" id="tv-b-v">0.30</span></label><input type="range" id="tv-b" min="0.1" max="0.5" step=".05" value=".3" oninput="updateLoss()"></div>
-<div class="chart-wrap"><canvas id="tvCh"></canvas></div>
-</div>
-<div>
-<h3><span class="badge badge-cy">Dice Loss</span></h3>
-<div class="formula"><div id="eq-dice"></div></div>
-<div class="info-box tip">Tversky 特例 (α=β=0.5) · 对称惩罚</div>
-<div class="chart-wrap"><canvas id="dCh"></canvas></div>
-</div>
-<div>
-<h3><span class="badge badge-gr">Focal Loss</span></h3>
-<div class="formula"><div id="eq-focal"></div></div>
-<div class="control-group"><label>γ (难样本放大) <span class="value" id="fc-g-v">2.0</span></label><input type="range" id="fc-g" min="0" max="5" step=".5" value="2" oninput="updateLoss()"></div>
-<div class="chart-wrap"><canvas id="fcCh"></canvas></div>
-</div>
-</div>
+<span class="c">    每个 Block 出 2~4 个 LoRA 层（取决于是否包含 q_pool）</span>
+<span class="c">    Stage 2 (7 blocks) + Stage 3 (2 blocks) = 9 blocks</span>
+<span class="c">    注入约 20 个 LoRALinear 层，共约 0.11M 可训练参数</span>
+    </div>
 </div>
 
-<!-- ===== MODULE 4: Training Pipeline ===== -->
-<div class="card grid-full">
-<h2>训练流水线</h2>
-<div class="timeline">
-<div class="timeline-dot" style="background:var(--pu)">1</div><div class="timeline-line"></div>
-<div class="timeline-dot" style="background:var(--ac)">2</div><div class="timeline-line"></div>
-<div class="timeline-dot" style="background:var(--cy)">3</div><div class="timeline-line"></div>
-<div class="timeline-dot" style="background:var(--gr)">4</div><div class="timeline-line"></div>
-<div class="timeline-dot" style="background:var(--or)">5</div><div class="timeline-line"></div>
-<div class="timeline-dot" style="background:var(--pi)">6</div>
+<!-- ==================== Chapter 5: Training Pipeline ==================== -->
+<div class="section">
+    <h2>5. 训练流程全景图</h2>
+
+    <h3>5.1 单帧训练模式</h3>
+
+    <div class="flow-row">
+        <div class="flow-box">视频帧<br>(1000×500<br>灰度图)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">Resize<br>1024×1024</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">归一化<br>[0,1]→ImageNet</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box lora">Image Encoder<br>(LoRA 微调)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box frozen">Prompt Encoder<br>(冻结)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box train">Mask Decoder<br>(全量训练)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">Mask 输出<br>(1024×1024)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">Dice + Focal<br>Loss</div>
+    </div>
+
+    <h3>5.2 训练循环详解</h3>
+
+    <pre><code><span class="c"># ====== 训练一个 Epoch ======</span>
+<span class="k">for</span> epoch <span class="k">in</span> range(num_epochs):
+    <span class="k">for</span> video_folder <span class="k">in</span> shuffled_train_videos:
+        frames = load_video_frames(video_folder)  <span class="c"># 逐视频加载，避免 OOM</span>
+        <span class="k">for</span> frame <span class="k">in</span> shuffled(frames):           <span class="c"># 视频内打乱</span>
+
+            <span class="c"># ── 单步训练 ──</span>
+            optimizer.zero_grad()                     <span class="c"># 1. 清零梯度</span>
+
+            features = model.forward_image(image)     <span class="c"># 2. 编码图像 (含LoRA)</span>
+            prompt   = model.prompt_encoder(point)    <span class="c"># 3. 编码提示点</span>
+            mask     = model.mask_decoder(features)   <span class="c"># 4. 解码mask</span>
+
+            loss = dice_loss(mask, gt) + focal_loss(mask, gt)  <span class="c"># 5. 计算损失</span>
+            loss.backward()                           <span class="c"># 6. 反向传播</span>
+            clip_grad_norm_(params, max_norm=1.0)     <span class="c"># 7. 梯度裁剪(防爆炸)</span>
+            optimizer.step()                          <span class="c"># 8. 更新参数</span>
+
+    <span class="c"># ── 定期验证 ──</span>
+    <span class="k">if</span> epoch % val_every == 0:
+        val_loss = validate(test_videos)              <span class="c"># 单帧loss（非端到端）</span>
+        <span class="k">if</span> val_loss < best_val_loss:
+            save_checkpoint(best_train)               <span class="c"># 含LoRA结构，可恢复训练</span>
+            save_for_inference(best_inference)         <span class="c"># 合并LoRA，可直接推理</span></code></pre>
+
+    <div class="tip">
+        <strong>为什么用单帧训练而不是视频训练？</strong><br>
+        视频训练需要在多帧间传递梯度（Memory Attention），极其消耗显存且不稳定。单帧训练把所有帧视为独立样本，训练稳定高效。微调完成的权重直接用于 Video Predictor 推理，跟踪效果自然变好——因为 "识别" 部分变强了，"跟踪" 部分不需要训练。
+    </div>
 </div>
-<table>
-<tr><th>#</th><th>阶段</th><th>核心操作</th><th>配置</th></tr>
-<tr><td>1</td><td>预加载数据</td><td>cv2 读取 → resize 1024² → 归一化 → 缓存内存</td><td>14 训练视频 + 7 验证视频</td></tr>
-<tr><td>2</td><td>数据增强</td><td>水平翻转 50% · 亮度抖动 50% · 时间逆序 30% · 平移 30%</td><td>每 batch 随机组合</td></tr>
-<tr><td>3</td><td>Batch 拼接</td><td>8 帧 stack → GPU → AMP autocast → forward_single_frame</td><td>batch=8, AMP fp16</td></tr>
-<tr><td>4</td><td>损失计算</td><td>Tversky(α=0.7) + Focal(γ=2) → backward → 梯度裁剪 1.0</td><td>Muon+AdamW 双优化器</td></tr>
-<tr><td>5</td><td>验证</td><td>每5 epoch · 单帧 IoU/Dice/Loss · 保存最佳 + 推理权重</td><td>早停 patience=15</td></tr>
-<tr><td>6</td><td>推理部署</td><td>best_inference.pth → build_sam2_video_predictor → 视频跟踪</td><td>FPS ~25, 24GB GPU</td></tr>
-</table>
+
+<!-- ==================== Chapter 6: Key Code ==================== -->
+<div class="section">
+    <h2>6. 关键代码解析</h2>
+
+    <h3>6.1 LoRA 层的实现</h3>
+
+<pre><code><span class="k">class</span> <span class="p">LoRALinear</span>(nn.Module):
+    <span class="c">"""在原始 Linear 层旁边加低秩旁路"""</span>
+    <span class="k">def</span> <span class="g">__init__</span>(self, original_linear, r=4, lora_alpha=8):
+        <span class="c"># 保存原始层（冻结）</span>
+        self.original_linear = original_linear
+        self.original_linear.weight.requires_grad = <span class="k">False</span>
+
+        <span class="c"># 创建低秩矩阵 A (r×d) 和 B (d×r)</span>
+        in_dim  = original_linear.in_features   <span class="c"># 例如 96</span>
+        out_dim = original_linear.out_features  <span class="c"># 例如 288</span>
+        self.scaling = lora_alpha / r            <span class="c"># 8 / 4 = 2.0</span>
+
+        self.lora_A = nn.Parameter(torch.zeros(r, in_dim))   <span class="c"># (4, 96)</span>
+        self.lora_B = nn.Parameter(torch.zeros(out_dim, r))   <span class="c"># (288, 4)</span>
+
+        <span class="c"># 初始化：A 用 Kaiming，B 初始化为零</span>
+        nn.init.kaiming_uniform_(self.lora_A)
+        nn.init.zeros_(self.lora_B)
+
+    <span class="k">def</span> <span class="g">forward</span>(self, x):
+        <span class="c"># 原始输出（冻结，无梯度）</span>
+        original = self.original_linear(x)         <span class="c"># x @ W^T</span>
+
+        <span class="c"># LoRA 修正量（可训练，有梯度）</span>
+        lora = (x @ self.lora_A.T @ self.lora_B.T) * self.scaling
+
+        <span class="c"># 最终输出 = 原始 + LoRA修正</span>
+        <span class="k">return</span> original + lora</code></pre>
+
+    <h3>6.2 为什么 B 初始化要为零？</h3>
+
+    <div class="diagram">
+<span class="c">    训练开始时：</span>
+<span class="c">    B = 0  →  lora_out = x @ A^T @ 0 = 0  →  output = original + 0</span>
+
+<span class="c">    第一轮反向传播：</span>
+<span class="c">    B 的梯度 ≠ 0（因为 loss 对 output 有梯度）</span>
+<span class="c">    A 的梯度 = 0（因为 B × A 中 B=0，d(loss)/dA = 0）  ← 这是正常的！</span>
+
+<span class="c">    第二轮开始：</span>
+<span class="c">    B 已被更新为非零值  →  A 的梯度 ≠ 0  →  两者都开始正常训练</span>
+
+<span class="g">    ✅ 这样设计的好处：LoRA 从"不做任何修改"开始，</span>
+<span class="g">       逐步学习需要的修正量，不会破坏预训练权重。</span>
+    </div>
+
+    <h3>6.3 保存与推理</h3>
+
+<pre><code><span class="k">def</span> save_for_inference(save_path):
+    <span class="c">"""保存可直接用于 Video Predictor 推理的权重"""</span>
+    clean_state_dict = {}
+
+    <span class="k">for</span> key, value <span class="k">in</span> model.state_dict().items():
+        <span class="k">if</span> <span class="s">'lora_A'</span> <span class="k">in</span> key <span class="k">or</span> <span class="s">'lora_B'</span> <span class="k">in</span> key:
+            <span class="k">continue</span>  <span class="c"># 跳过 LoRA 参数，推理时不需要</span>
+
+        <span class="k">if</span> <span class="s">'original_linear.weight'</span> <span class="k">in</span> key:
+            <span class="c"># 合并 LoRA 权重：W_merged = W + B×A × scale</span>
+            <span class="c"># 然后把 key 从 'original_linear.weight' 替换为 'weight'</span>
+            delta = lora_B @ lora_A * scale
+            merged_key = key.replace(<span class="s">'original_linear.'</span>, <span class="s">''</span>)
+            clean_state_dict[merged_key] = value + delta
+        <span class="k">else</span>:
+            clean_state_dict[key] = value
+
+    <span class="c"># 保存为 build_sam2 兼容格式：ckpt["model"]</span>
+    torch.save({<span class="s">'model'</span>: clean_state_dict}, save_path)</code></pre>
+
+    <div class="tip">
+        <strong>关键设计决策</strong>：保存时<strong>不修改内存中的模型</strong>。只在 state_dict 副本中计算合并后的权重。这样训练可以无缝继续，不会因为保存而丢失 LoRA 结构。
+    </div>
 </div>
 
-</div><!-- end grid -->
+<!-- ==================== Chapter 7: Parameters ==================== -->
+<div class="section">
+    <h2>7. 微调参数详解</h2>
 
-<footer>Auto-Prompt SAM 2 · Phase 3 · LoRA Fine-tuning Interactive Courseware · 2025</footer>
+    <table>
+        <tr><th>模块</th><th>参数量</th><th>微调策略</th><th>原因</th></tr>
+        <tr>
+            <td><strong>Image Encoder</strong></td>
+            <td>~9M</td>
+            <td style="color: var(--purple);"><strong>LoRA 微调 (r=4)</strong></td>
+            <td>需要学会识别雷达目标，但全量微调会过拟合<br>LoRA 参数仅 0.11M</td>
+        </tr>
+        <tr>
+            <td><strong>Mask Decoder</strong></td>
+            <td>~4.22M</td>
+            <td style="color: var(--green);"><strong>全量微调</strong></td>
+            <td>分割头需要大幅适应雷达边界特征<br>参数量可控，过拟合风险低</td>
+        </tr>
+        <tr>
+            <td><strong>Prompt Encoder</strong></td>
+            <td>~0.1M</td>
+            <td style="color: var(--text2);">冻结</td>
+            <td>点坐标编码不需要改变</td>
+        </tr>
+        <tr>
+            <td><strong>Memory Attention</strong></td>
+            <td>~2M</td>
+            <td style="color: var(--text2);">冻结</td>
+            <td>帧间匹配能力是通用的</td>
+        </tr>
+        <tr>
+            <td><strong>Memory Encoder</strong></td>
+            <td>~1M</td>
+            <td style="color: var(--text2);">冻结</td>
+            <td>特征编码通用</td>
+        </tr>
+    </table>
 
-<script>
-// ========== Tab switching ==========
-function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('panel-' + name).classList.add('active');
-}
+    <h3>训练超参数</h3>
 
-// ========== KaTeX helpers ==========
-function katexRender(el, tex) {
-  try { katex.render(tex, el, { displayMode: true, throwOnError: false }); } catch(e) { el.textContent = tex; }
-}
+    <table>
+        <tr><th>参数</th><th>值</th><th>说明</th></tr>
+        <tr><td>学习率 (lr)</td><td>1e-5</td><td>保守设置，保护预训练权重</td></tr>
+        <tr><td>LoRA 秩 (r)</td><td>4</td><td>极小的秩，抑制过拟合</td></tr>
+        <tr><td>LoRA Alpha</td><td>8</td><td>缩放因子 = alpha/r = 2.0</td></tr>
+        <tr><td>梯度裁剪</td><td>1.0</td><td>防止梯度爆炸</td></tr>
+        <tr><td>图像大小</td><td>1024×1024</td><td>SAM 2 训练分辨率</td></tr>
+        <tr><td>验证频率</td><td>每 5 epoch</td><td>单帧 loss 验证</td></tr>
+    </table>
+</div>
 
-// ========== Module 2: LoRA Matrix Demo ==========
-function createMatrix(rows, cols, highlight, id) {
-  const grid = document.getElementById(id);
-  grid.innerHTML = '';
-  grid.style.gridTemplateColumns = `repeat(${Math.min(cols, 24)}, 1fr)`;
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < Math.min(cols, 24); j++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      if (highlight && i < highlight.rows && j < highlight.cols) {
-        cell.className = 'cell highlight';
-      } else if (Math.random() < 0.15) {
-        cell.className = 'cell nonzero';
-        cell.textContent = (Math.random() < 0.5 ? '·' : '∘');
-      } else {
-        cell.className = 'cell zero';
-      }
-      grid.appendChild(cell);
-    }
-  }
-}
+<!-- ==================== Chapter 8: Usage ==================== -->
+<div class="section">
+    <h2>8. 完整使用命令</h2>
 
-function updateLoraDemo() {
-  const d = parseInt(document.getElementById('lora-dim').value);
-  const d2 = parseInt(document.getElementById('lora-dim2').value);
-  const r = parseInt(document.getElementById('lora-demo-r').value);
-  const alpha = parseInt(document.getElementById('lora-demo-alpha').value);
+<pre><code><span class="c"># ===== 步骤 1：微调 SAM 2 =====</span>
+python scripts/finetune_sam2_lora.py \
+    --sam2-config configs/sam2.1/sam2.1_hiera_t.yaml \
+    --sam2-ckpt checkpoints/sam2.1_hiera_tiny.pt \
+    --train-list /root/e2e/train1.txt \
+    --test-list /root/e2e/test1.txt \
+    --image-size 1024 \
+    --epochs 50 \
+    --lr 1e-5 \
+    --lora-rank 4 \
+    --val-every 5 \
+    --output results/phase3_sam2_lora
 
-  document.getElementById('lora-dim-val').textContent = d;
-  document.getElementById('lora-dim2-val').textContent = d2;
-  document.getElementById('lora-demo-r-val').textContent = r;
-  document.getElementById('lora-demo-alpha-val').textContent = alpha;
+<span class="c"># ===== 步骤 2：仅测试 SAM 2（用 GT 中心点，排除引导头误差）=====</span>
+python scripts/test_sam2_finetuned.py \
+    --sam2-ckpt results/phase3_sam2_lora/checkpoints/best_inference.pth \
+    --test-list /root/e2e/test1.txt
 
-  document.getElementById('demo-d').textContent = d;
-  document.getElementById('demo-d2').textContent = d2;
-  document.getElementById('demo-r').textContent = r;
-  document.getElementById('demo-scale').textContent = (alpha/r).toFixed(2);
+<span class="c"># ===== 步骤 3：端到端测试（引导头 + 微调后的 SAM 2）=====</span>
+python scripts/evaluate_e2e.py \
+    --guidance-ckpt checkpoints/exp6_embed64/.../best.pth \
+    --sam2-ckpt results/phase3_sam2_lora/checkpoints/best_inference.pth \
+    --test-list /root/e2e/test1.txt
 
-  createMatrix(1, d, null, 'matrix-x');
-  createMatrix(4, d2/12, null, 'matrix-w');
-  createMatrix(d/4, r, {rows: d/4, cols: r}, 'matrix-a');
-  createMatrix(r, d2/12, {rows: r, cols: d2/12}, 'matrix-b');
+<span class="c"># ===== 意外中断后恢复训练 =====</span>
+python scripts/finetune_sam2_lora.py \
+    --resume-from results/phase3_sam2_lora/checkpoints/best_train.pth \
+    --output results/phase3_sam2_lora</code></pre>
+</div>
 
-  const full = d * d2;
-  const lora = r * (d + d2);
-  const pct = (lora / full * 100);
-  document.getElementById('insight-full').textContent = full.toLocaleString();
-  document.getElementById('insight-lora').textContent = lora.toLocaleString();
-  document.getElementById('insight-pct').textContent = pct < 0.1 ? pct.toFixed(2) : pct.toFixed(1);
+<!-- ==================== Chapter 9: Summary ==================== -->
+<div class="section">
+    <h2>9. 一句话总结</h2>
 
-  document.getElementById('demo-params').textContent =
-    `原始参数: ${full.toLocaleString()} · LoRA参数: ${lora.toLocaleString()} (${(100-pct).toFixed(1)}% 压缩)`;
+    <div class="diagram">
+<span class="g">┌──────────────────────────────────────────────────────────────────┐</span>
+<span class="g">│                                                                  │</span>
+<span class="g">│   训练时：                                                        │</span>
+<span class="g">│   build_sam2 (底层模型) + LoRA旁路 + 单帧训练 + Dice/Focal Loss  │</span>
+<span class="g">│                                                                  │</span>
+<span class="g">│   推理时：                                                        │</span>
+<span class="g">│   build_sam2_video_predictor (加载合并后的权重)                   │</span>
+<span class="g">│                                                                  │</span>
+<span class="g">│   保存时：                                                        │</span>
+<span class="g">│   best_train.pth = LoRA结构 → 恢复训练                           │</span>
+<span class="g">│   best_inference.pth = 合并权重 → 直接推理                       │</span>
+<span class="g">│                                                                  │</span>
+<span class="g">│   核心技巧：                                                      │</span>
+<span class="g">│   绕过 Video Predictor API → 用底层模型训练 → 合并LoRA回推理API  │</span>
+<span class="g">│                                                                  │</span>
+<span class="g">└──────────────────────────────────────────────────────────────────┘</span>
+    </div>
+</div>
 
-  // KaTeX formula
-  const tex = String.raw`\text{output} = \underbrace{Wx}_{\text{冻结}} + \underbrace{\frac{\alpha}{r} \cdot (x A^T) B^T}_{\text{LoRA 可训练}}`;
-  document.querySelector('#panel-lora-math .formula').innerHTML = '<div style="text-align:center;font-size:15px"></div>';
-  katexRender(document.querySelector('#panel-lora-math .formula div'), tex);
-}
+<footer style="text-align: center; padding: 30px; color: var(--text2); font-size: 13px;">
+    2025 · Auto-Prompt SAM 2 · Phase 3 LoRA Fine-tuning Guide
+</footer>
 
-// ========== Module 3: Parameter Derivation ==========
-let derivePie;
-
-function updateDerivation() {
-  const r = parseInt(document.getElementById('derive-r').value);
-  const stages = document.getElementById('derive-stages').value;
-  document.getElementById('derive-r-val').textContent = r;
-
-  // Block counts and avg dims per stage
-  const stageInfo = {
-    '1': {blocks: 2, avgDim: 144, layersPerBlock: 2},
-    '2': {blocks: 7, avgDim: 240, layersPerBlock: 2.5},
-    '3': {blocks: 2, avgDim: 576, layersPerBlock: 2.5}
-  };
-
-  let totalLora = 0;
-  let breakdown = [];
-
-  for (const s of stages.split('')) {
-    if (!stageInfo[s]) continue;
-    const info = stageInfo[s];
-    const layers = Math.round(info.blocks * info.layersPerBlock);
-    const params = layers * 2 * r * info.avgDim; // 2 for A and B
-    totalLora += params;
-    breakdown.push(`Stage ${s}: ${info.blocks} blocks × ${info.layersPerBlock} layers × 2(A+B) × ${r} × ${info.avgDim} = ${(params/1e6).toFixed(2)}M`);
-  }
-
-  const loraM = totalLora / 1e6;
-  const decoderM = 4.22;
-  const frozenM = 39.04 - loraM - decoderM;
-  const total = loraM + decoderM;
-
-  document.getElementById('derive-lora').textContent = loraM.toFixed(2) + 'M';
-  document.getElementById('derive-frozen').textContent = frozenM.toFixed(2) + 'M';
-  document.getElementById('derive-total').textContent = total.toFixed(2) + 'M (' + (total/39.04*100).toFixed(1) + '%)';
-
-  // KaTeX derivation steps
-  katexRender(document.getElementById('derive-step1'), String.raw`\text{Step 1: 每个 LoRA 层} = r \times (d_{in} + d_{out}) \text{ 参数}`);
-  katexRender(document.getElementById('derive-step2'), String.raw`\text{Step 2: 总 LoRA 参数} = \sum_{\text{stages}} (N_{\text{layers}} \times 2 \times r \times d_{\text{avg}})`);
-  katexRender(document.getElementById('derive-step3'), breakdown.map(b => String.raw`\text{· }` + b).join(String.raw`\\`));
-  katexRender(document.getElementById('derive-step4'), String.raw`\text{总计} = ${loraM.toFixed(2)}\text{M LoRA} + ${decoderM}\text{M Decoder} = \boxed{${total.toFixed(2)}\text{M 可训练} \;(11.0\%)}`);
-
-  // Pie chart
-  const canvas = document.getElementById('derive-pie');
-  if (derivePie) derivePie.destroy();
-  derivePie = new Chart(canvas, {
-    type: 'doughnut',
-    data: {
-      labels: ['LoRA', 'Mask Decoder', '冻结'],
-      datasets: [{data: [loraM, decoderM, frozenM], backgroundColor: ['#a371f7', '#3fb950', '#30363d'], borderColor: '#12171f', borderWidth: 2}]
-    },
-    options: {responsive: true, maintainAspectRatio: true, plugins: {legend: {display: false}}}
-  });
-}
-
-// ========== Module 4: Code Analysis ==========
-function renderCodePanel() {
-  const code = [
-    {text: 'class LoRALinear(nn.Module):', cls: 'kw', note: 'LoRA 适配器：替代原始 Linear 层，在原有权重旁添加低秩可训练旁路'},
-    {text: '    """LoRA 低秩适应层"""', cls: 'cm', note: ''},
-    {text: '    def __init__(self, original_linear, r=4, lora_alpha=8):', cls: 'fn', note: 'r: 低秩矩阵的秩 · α: 缩放因子 · 原始层被冻结'},
-    {text: '        super().__init__()', cls: 'fn', note: ''},
-    {text: '        self.original_linear = original_linear', cls: 'cd', note: '保存原始 Linear 层引用（冻结，不更新）'},
-    {text: '        self.scaling = lora_alpha / r', cls: 'cd', note: '缩放因子 = α/r，控制 LoRA 修正的幅度'},
-    {text: '', cls: '', note: ''},
-    {text: '        # 创建低秩矩阵 A (r×d) 和 B (d_out×r)', cls: 'cm', note: 'A 和 B 是唯一可训练的参数'},
-    {text: '        in_dim = original_linear.in_features   # 96', cls: 'cd', note: '输入维度 d'},
-    {text: '        out_dim = original_linear.out_features # 288', cls: 'cd', note: '输出维度 d′'},
-    {text: '        self.lora_A = nn.Parameter(torch.zeros(r, in_dim))', cls: 'cd', note: 'A: (r×d)=4×96=384 参数 · Kaiming 初始化'},
-    {text: '        self.lora_B = nn.Parameter(torch.zeros(out_dim, r))', cls: 'cd', note: 'B: (d′×r)=288×4=1152 参数 · 零初始化'},
-    {text: '', cls: '', note: ''},
-    {text: '        # 初始化策略', cls: 'cm', note: 'B 初始化为 0 确保训练从"不做修正"开始'},
-    {text: '        nn.init.kaiming_uniform_(self.lora_A)', cls: 'cd', note: 'A 用 Kaiming 均匀分布 · 确保初始梯度不消失'},
-    {text: '        nn.init.zeros_(self.lora_B)', cls: 'cd', note: 'B 初始化为零 · 第一步 lora_out = 0 · 从第二步起才有效'},
-    {text: '', cls: '', note: ''},
-    {text: '    def forward(self, x):', cls: 'fn', note: '前向传播：原始输出 + LoRA 修正量'},
-    {text: '        original = self.original_linear(x)', cls: 'cd', note: '冻结的原始路径：W·x'},
-    {text: '        lora = (x @ self.lora_A.T @ self.lora_B.T) * self.scaling', cls: 'cd', note: 'LoRA 修正：x @ A^T @ B^T × α/r'},
-    {text: '        return original + lora', cls: 'kw', note: '最终输出 = W·x + (x·A^T·B^T)·α/r'},
-  ];
-
-  const container = document.getElementById('code-lora');
-  container.innerHTML = code.map((line, i) => {
-    if (!line.text.trim()) return '<div class="line"><span class="ln"></span><span class="cd"></span></div>';
-    return `<div class="line" data-note="${line.note || ''}" onmouseenter="showCodeNote(this)" onmouseleave="hideCodeNote(this)">
-      <span class="ln">${i+1}</span><span class="${line.cls}">${line.text}</span>
-    </div>`;
-  }).join('');
-}
-
-function showCodeNote(el) {
-  const note = el.dataset.note;
-  if (!note) return;
-  el.classList.add('highlight');
-  document.getElementById('code-note').textContent = '▸ ' + note;
-  document.getElementById('code-note').style.color = '#c9d1d9';
-}
-function hideCodeNote(el) {
-  el.classList.remove('highlight');
-  document.getElementById('code-note').textContent = '鼠标悬停代码行查看说明';
-  document.getElementById('code-note').style.color = '#8b949e';
-}
-
-// ========== Training Simulator ==========
-let lossCh, iouCh;
-function runSim() {
-  const lossType = document.getElementById('sim-loss').value;
-  const aug = document.getElementById('sim-aug').value;
-  const opt = document.getElementById('sim-opt').value;
-  const epochs = Array.from({length:50},(_,i)=>i+1);
-
-  const mb = opt==='muon'?.85:1, ab = aug==='on'?.9:1, ls = lossType==='tversky'?.12:(lossType==='dice'?.14:.15);
-
-  const tl=[], vl=[], vi=[];
-  for(let i=0;i<50;i++){
-    const e=epochs[i];
-    tl.push(ls*Math.exp(-e*.08*mb)+.03*Math.exp(-e*.02)+.015*(Math.random()-.5));
-    const v=ls*1.3*Math.exp(-e*.06*mb*ab)+.06+.0002*(e-15)*Math.max(0,e-15)+.01*(Math.random()-.5);
-    vl.push(Math.min(v,ls*1.5));
-    vi.push(Math.min(.55*ab+(.62*ab-.55*ab)*(1-Math.exp(-e*.15*mb))-.02*Math.max(0,e-20)*.003+.015*(Math.random()-.5),.65));
-  }
-
-  const c1=document.getElementById('lossCh');
-  if(lossCh)lossCh.destroy();
-  lossCh=new Chart(c1,{type:'line',data:{labels:epochs,datasets:[
-    {label:'Train Loss',data:tl,borderColor:'#58a6ff',borderWidth:2,pointRadius:0,tension:.3},
-    {label:'Val Loss',data:vl,borderColor:'#f85149',borderWidth:2,borderDash:[5,5],pointRadius:0,tension:.3}
-  ]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{grid:{color:'#1e293b'},ticks:{color:'#8b949e'}},x:{grid:{color:'#1e293b'},ticks:{color:'#8b949e'}}},plugins:{legend:{labels:{color:'#c9d1d9',usePointStyle:true}}}}});
-
-  const c2=document.getElementById('iouCh');
-  if(iouCh)iouCh.destroy();
-  iouCh=new Chart(c2,{type:'line',data:{labels:epochs,datasets:[
-    {label:'Val IoU (单帧)',data:vi,borderColor:'#3fb950',backgroundColor:'rgba(63,185,80,.1)',borderWidth:2,fill:true,pointRadius:0,tension:.3}
-  ]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{min:0,max:.7,grid:{color:'#1e293b'},ticks:{color:'#8b949e',callback:v=>(v*100).toFixed(0)+'%'}},x:{grid:{color:'#1e293b'},ticks:{color:'#8b949e'}}},plugins:{legend:{labels:{color:'#c9d1d9'}}}}});
-}
-
-// ========== Loss Function Charts ==========
-let tvCh, dCh, fcCh;
-function updateLoss(){
-  const a=parseFloat(document.getElementById('tv-a').value), b=parseFloat(document.getElementById('tv-b').value);
-  const g=parseFloat(document.getElementById('fc-g').value);
-  document.getElementById('tv-a-v').textContent=a.toFixed(2);
-  document.getElementById('tv-b-v').textContent=b.toFixed(2);
-  document.getElementById('fc-g-v').textContent=g.toFixed(1);
-
-  // KaTeX
-  katexRender(document.getElementById('eq-tversky'),String.raw`L_{\text{tversky}} = 1 - \frac{TP + \varepsilon}{TP + ${a.toFixed(2)} \cdot FN + ${b.toFixed(2)} \cdot FP + \varepsilon}`);
-  katexRender(document.getElementById('eq-dice'),String.raw`L_{\text{dice}} = 1 - \frac{2 \cdot TP}{2 \cdot TP + FN + FP + \varepsilon}`);
-  katexRender(document.getElementById('eq-focal'),String.raw`L_{\text{focal}} = -\alpha \cdot (1-p_t)^{${g.toFixed(1)}} \cdot \log(p_t)`);
-
-  const p=Array.from({length:100},(_,i)=>i/100);
-  const dice=p.map(v=>2*v*.3/(v+.3+1e-6));
-  const tv=p.map(v=>v*.3/(v*.3+a*(.3-v*.3)+b*(v-v*.3)+1e-6));
-  const pt=Array.from({length:100},(_,i)=>(i+1)/100);
-  const f0=pt.map(v=>-Math.log(Math.max(v,.01)));
-  const fg=pt.map(v=>-((1-v)**g)*Math.log(Math.max(v,.01)));
-
-  const c1=document.getElementById('tvCh'); if(tvCh)tvCh.destroy();
-  tvCh=new Chart(c1,{type:'line',data:{labels:p,datasets:[
-    {label:'Tversky',data:tv,borderColor:'#a371f7',borderWidth:2,pointRadius:0,tension:.3},
-    {label:'Dice',data:dice,borderColor:'#39c5cf',borderWidth:1.5,borderDash:[4,4],pointRadius:0,tension:.3}
-  ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:1}},plugins:{legend:{labels:{color:'#c9d1d9',font:{size:10},usePointStyle:true}}}}});
-
-  const c2=document.getElementById('dCh'); if(dCh)dCh.destroy();
-  dCh=new Chart(c2,{type:'line',data:{labels:p,datasets:[
-    {label:'Dice',data:dice,borderColor:'#39c5cf',borderWidth:2,pointRadius:0,tension:.3}
-  ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:1}},plugins:{legend:{labels:{color:'#c9d1d9',font:{size:10}}}}}});
-
-  const c3=document.getElementById('fcCh'); if(fcCh)fcCh.destroy();
-  fcCh=new Chart(c3,{type:'line',data:{labels:pt,datasets:[
-    {label:`Focal γ=${g}`,data:fg,borderColor:'#3fb950',borderWidth:2,pointRadius:0,tension:.3},
-    {label:'CE (γ=0)',data:f0,borderColor:'#8b949e',borderWidth:1,borderDash:[4,4],pointRadius:0,tension:.3}
-  ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false}},plugins:{legend:{labels:{color:'#c9d1d9',font:{size:10},usePointStyle:true}}}}});
-}
-
-// ========== Init ==========
-updateLoraDemo();
-updateDerivation();
-renderCodePanel();
-runSim();
-updateLoss();
-</script>
+</div>
 </body>
 </html>

@@ -1,0 +1,223 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - heading "🧬 SAM 2 LoRA 微调仪表盘" [level=1] [ref=e3]
+    - paragraph [ref=e4]: 交互式可视化 · 动态参数计算 · 训练模拟 · 损失函数面板
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - heading "🏗️ 架构动态图 — LoRA 注入位置" [level=2] [ref=e7]:
+        - generic [ref=e8]: 🏗️
+        - text: 架构动态图 — LoRA 注入位置
+      - generic [ref=e9]:
+        - button "总览" [ref=e10] [cursor=pointer]
+        - button "Block 细节" [ref=e11] [cursor=pointer]
+        - button "Stage 分析" [ref=e12] [cursor=pointer]
+      - img [ref=e14]:
+        - generic [ref=e16]: Image Encoder
+        - generic [ref=e17]: Hiera ViT · 12 Blocks
+        - generic [ref=e19]: S0
+        - generic [ref=e21]: S1
+        - generic [ref=e23]: S2
+        - generic [ref=e25]: S3
+        - generic [ref=e26]: "LoRA 注入: Stage 2+3"
+        - generic [ref=e27]: ~20 LoRA layers · 0.11M params
+        - generic [ref=e29]: FPN Neck (冻结)
+        - generic [ref=e32]: Prompt Encoder
+        - generic [ref=e33]: 冻结 ❄️
+        - generic [ref=e35]: Memory Attention
+        - generic [ref=e36]: 冻结 ❄️
+        - generic [ref=e38]: Mask Decoder
+        - generic [ref=e39]: 全量训练 🔥 · 4.22M params
+        - generic [ref=e41]: Mask 输出
+        - generic [ref=e42]: (B, 1, 256, 256)
+        - generic [ref=e43]: ❄️ 冻结
+        - generic [ref=e44]: ⚡ LoRA
+        - generic [ref=e45]: 🔥 训练
+        - generic [ref=e47]: "输入: Sonar B-scan (1024×1024)"
+    - generic [ref=e48]:
+      - heading "📊 动态参数计算器" [level=2] [ref=e49]:
+        - generic [ref=e50]: 📊
+        - text: 动态参数计算器
+      - paragraph [ref=e51]: 基于 sam2.1_hiera_tiny (39M)，实时计算 LoRA 参数量
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - text: LoRA Rank (r)
+          - generic [ref=e54]: "4"
+        - slider [ref=e55]: "4"
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - text: LoRA Alpha
+          - generic [ref=e58]: "8"
+        - slider [ref=e59]: "8"
+      - generic [ref=e60]:
+        - generic [ref=e61]: 注入范围
+        - combobox [ref=e62] [cursor=pointer]:
+          - option "Stage 2 + Stage 3 (推荐)" [selected]
+          - option "Stage 1 + 2 + 3"
+          - option "仅 Stage 3"
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - text: "LoRA 可训练:"
+          - strong [ref=e68]: 0.09M
+        - generic [ref=e69]:
+          - text: "Mask Decoder:"
+          - strong [ref=e71]: 4.22M
+        - generic [ref=e72]:
+          - text: "冻结参数:"
+          - strong [ref=e74]: 34.73M
+        - generic [ref=e75]:
+          - text: "总可训练:"
+          - strong [ref=e76]: 4.31M
+          - text: (11.0%)
+      - generic [ref=e77]:
+        - text: Scaling factor = α / r =
+        - strong [ref=e78]: "2.00"
+    - generic [ref=e79]:
+      - heading "📈 训练过程模拟器" [level=2] [ref=e80]:
+        - generic [ref=e81]: 📈
+        - text: 训练过程模拟器
+      - generic [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e84]: 损失函数
+          - combobox [ref=e85] [cursor=pointer]:
+            - option "Tversky (α=0.7, β=0.3)" [selected]
+            - option "Dice"
+            - option "Focal (γ=2)"
+        - generic [ref=e86]:
+          - generic [ref=e87]: 数据增强
+          - combobox [ref=e88] [cursor=pointer]:
+            - option "开启" [selected]
+            - option "关闭"
+        - generic [ref=e89]:
+          - generic [ref=e90]: 优化器
+          - combobox [ref=e91] [cursor=pointer]:
+            - option "Muon+AdamW" [selected]
+            - option "AdamW"
+        - button "🔄 重新模拟" [ref=e92] [cursor=pointer]
+      - paragraph [ref=e97]: 模拟基于真实训练数据趋势：SAM2 Tiny + LoRA r=4 + batch=8 + 14视频训练集。数据增强降低过拟合，Muon加速收敛。
+    - generic [ref=e98]:
+      - heading "🧮 损失函数可视化面板" [level=2] [ref=e99]:
+        - generic [ref=e100]: 🧮
+        - text: 损失函数可视化面板
+      - generic [ref=e101]:
+        - generic [ref=e102]:
+          - heading "Tversky Loss" [level=3] [ref=e103]:
+            - generic [ref=e104]: Tversky Loss
+          - generic [ref=e105]:
+            - generic [ref=e106]: Tversky Index
+            - generic [ref=e107]: TI = TP / (TP + α·FN + β·FP)
+            - generic [ref=e108]: α 控制漏检惩罚，β 控制误检惩罚
+          - generic [ref=e109]:
+            - generic [ref=e110]: 小目标配置
+            - generic [ref=e111]:
+              - text: L = 1 - TI
+              - subscript [ref=e112]: α=0.7, β=0.3
+            - generic [ref=e113]: α > β：漏检比误检代价高 2.3×
+          - generic [ref=e114]:
+            - generic [ref=e115]:
+              - text: α (漏检权重)
+              - generic [ref=e116]: "0.70"
+            - slider [ref=e117]: "0.7"
+          - generic [ref=e118]:
+            - generic [ref=e119]:
+              - text: β (误检权重)
+              - generic [ref=e120]: "0.30"
+            - slider [ref=e121]: "0.3"
+        - generic [ref=e123]:
+          - heading "Dice Loss" [level=3] [ref=e124]:
+            - generic [ref=e125]: Dice Loss
+          - generic [ref=e126]:
+            - generic [ref=e127]: Dice / F1 Score
+            - generic [ref=e128]: Dice = 2·TP / (2·TP + FN + FP)
+            - generic [ref=e129]: Tversky 的特例 (α=β=0.5)
+          - generic [ref=e130]:
+            - generic [ref=e131]: Dice Loss
+            - generic [ref=e132]:
+              - text: L
+              - subscript [ref=e133]: dice
+              - text: = 1 - Dice
+            - generic [ref=e134]: 对称惩罚 FN 和 FP
+          - paragraph [ref=e135]: Dice 对小目标不友好：小目标的 |pred| 和 |gt| 都很小，Dice 对边界像素的惩罚不足，容易产生模糊预测。
+        - generic [ref=e137]:
+          - heading "Focal Loss" [level=3] [ref=e138]:
+            - generic [ref=e139]: Focal Loss
+          - generic [ref=e140]:
+            - generic [ref=e141]: Focal Loss
+            - generic [ref=e142]:
+              - text: FL = -α(1-p
+              - subscript [ref=e143]: t
+              - text: )
+              - superscript [ref=e144]: γ
+              - text: log(p
+              - subscript [ref=e145]: t
+              - text: )
+            - generic [ref=e146]: γ 放大难样本权重，减轻类不平衡
+          - generic [ref=e147]:
+            - generic [ref=e148]: 组合损失
+            - generic [ref=e149]:
+              - text: L
+              - subscript [ref=e150]: total
+              - text: = L
+              - subscript [ref=e151]: tversky
+              - text: + L
+              - subscript [ref=e152]: focal
+            - generic [ref=e153]: 分割精度 + 难样本挖掘
+          - generic [ref=e154]:
+            - generic [ref=e155]:
+              - text: Focal γ
+              - generic [ref=e156]: "2.0"
+            - slider [ref=e157]: "2"
+    - generic [ref=e159]:
+      - heading "⚙️ 当前训练配置摘要" [level=2] [ref=e160]:
+        - generic [ref=e161]: ⚙️
+        - text: 当前训练配置摘要
+      - generic [ref=e162]:
+        - generic [ref=e163]: "1"
+        - generic [ref=e165]: "2"
+        - generic [ref=e167]: "3"
+        - generic [ref=e169]: "4"
+        - generic [ref=e171]: "5"
+        - generic [ref=e173]: "6"
+      - table [ref=e174]:
+        - rowgroup [ref=e175]:
+          - row "阶段 内容 配置 状态" [ref=e176]:
+            - columnheader "阶段" [ref=e177]
+            - columnheader "内容" [ref=e178]
+            - columnheader "配置" [ref=e179]
+            - columnheader "状态" [ref=e180]
+          - row "1 模型加载 SAM2 Tiny · build_sam2 ✓" [ref=e181]:
+            - cell "1" [ref=e182]
+            - cell "模型加载" [ref=e183]
+            - cell "SAM2 Tiny · build_sam2" [ref=e184]
+            - cell "✓" [ref=e185]:
+              - generic [ref=e186]: ✓
+          - row "2 LoRA 注入 r=4, α=8 · Stage 2+3 · 0.11M 参数 ⚡" [ref=e187]:
+            - cell "2" [ref=e188]
+            - cell "LoRA 注入" [ref=e189]
+            - cell "r=4, α=8 · Stage 2+3 · 0.11M 参数" [ref=e190]
+            - cell "⚡" [ref=e191]:
+              - generic [ref=e192]: ⚡
+          - row "3 数据增强 水平翻转 50% · 亮度 50% · 时间逆序 30% · 平移 30% ✦" [ref=e193]:
+            - cell "3" [ref=e194]
+            - cell "数据增强" [ref=e195]
+            - cell "水平翻转 50% · 亮度 50% · 时间逆序 30% · 平移 30%" [ref=e196]
+            - cell "✦" [ref=e197]:
+              - generic [ref=e198]: ✦
+          - row "4 训练循环 Muon+AdamW · Tversky+Focal · AMP · batch=8 · 梯度裁剪 1.0 ✓" [ref=e199]:
+            - cell "4" [ref=e200]
+            - cell "训练循环" [ref=e201]
+            - cell "Muon+AdamW · Tversky+Focal · AMP · batch=8 · 梯度裁剪 1.0" [ref=e202]
+            - cell "✓" [ref=e203]:
+              - generic [ref=e204]: ✓
+          - row "5 验证 每 5 epoch · 单帧 IoU+Dice · 早停 patience=15 ✓" [ref=e205]:
+            - cell "5" [ref=e206]
+            - cell "验证" [ref=e207]
+            - cell "每 5 epoch · 单帧 IoU+Dice · 早停 patience=15" [ref=e208]
+            - cell "✓" [ref=e209]:
+              - generic [ref=e210]: ✓
+          - row "6 推理部署 best_inference.pth · build_sam2_video_predictor ✓" [ref=e211]:
+            - cell "6" [ref=e212]
+            - cell "推理部署" [ref=e213]
+            - cell "best_inference.pth · build_sam2_video_predictor" [ref=e214]
+            - cell "✓" [ref=e215]:
+              - generic [ref=e216]: ✓
+  - contentinfo [ref=e217]: Auto-Prompt SAM 2 · Phase 3 · LoRA Fine-tuning Dashboard · 2025

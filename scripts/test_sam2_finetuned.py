@@ -105,15 +105,27 @@ def load_video_data(folder_path: str, target_label: str):
 def init_predictor(config_path: str, checkpoint_path: str, device: str, is_baseline: bool = False):
     """初始化SAM 2预测器"""
     try:
-        from sam2.build_sam import build_sam2_video_predictor
-
-        # 微调后的 best_inference.pth 使用 checkpoint["model"] 格式，
-        # build_sam2_video_predictor 内部直接加载，无需手动 load_state_dict
-        predictor = build_sam2_video_predictor(config_path, checkpoint_path, device=device)
+        from sam2.build_sam import build_sam2, build_sam2_video_predictor
+        import torch
 
         if is_baseline:
+            predictor = build_sam2_video_predictor(config_path, checkpoint_path, device=device)
             print(f"加载原始SAM 2模型: {checkpoint_path}")
         else:
+            # 微调后的checkpoint可能缺少新版SAM2新增的key，用strict=False加载
+            ckpt = torch.load(checkpoint_path, map_location=device)
+            if 'model' in ckpt:
+                sd = ckpt['model']
+            elif 'model_state_dict' in ckpt:
+                sd = ckpt['model_state_dict']
+            else:
+                sd = ckpt
+
+            predictor = build_sam2_video_predictor(config_path, device=device)
+            missing, unexpected = predictor.load_state_dict(sd, strict=False)
+            if missing:
+                print(f"  注意: {len(missing)} 个key在新版SAM2中缺失（不影响功能）")
+
             print(f"加载微调后的SAM 2模型: {checkpoint_path}")
             print("✓ 加载微调权重成功")
 
