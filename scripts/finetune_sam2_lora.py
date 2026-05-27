@@ -89,24 +89,21 @@ def parse_args():
 
 def apply_augmentation(batch_frames):
     """
-    声呐时序数据增强（在 batch 级别随机应用）
+    声呐时序数据增强（GPU 上操作）
 
     增强策略：
     - 水平翻转 (50%): 声呐沿轨迹方向对称
     - 时间逆序 (30%): 目标可以正向或反向移动
     - 亮度抖动 (50%): 模拟不同 SNR 条件
     - 随机平移 (30%): 模拟目标位置变化
-
-    注意：不做垂直翻转，因为声呐的深度/距离轴不对称
     """
     if np.random.random() < 0.5:
-        # 水平翻转（bearing 轴对称）
+        # 水平翻转
         for f in batch_frames:
-            f['image'] = torch.flip(f['image'], dims=[-1])  # 翻转 W 轴
+            f['image'] = torch.flip(f['image'], dims=[-1])
             f['gt_mask'] = torch.flip(f['gt_mask'], dims=[-1])
-            # 修正 prompt 点坐标
             W = f['image'].shape[-1]
-            f['point'][..., 0] = W - f['point'][..., 0]
+            f['point'][..., 0] = W - f['point'][..., 0]  # (N,2) 格式，最后一维是 x
 
     if np.random.random() < 0.3:
         # 时间逆序（帧序列反转）
@@ -542,12 +539,20 @@ def main():
                     if len(batch_frames) < args.batch_size and i < len(video_frames) - 1:
                         continue
 
-                    # 数据增强 + 拼 batch
-                    batch_frames = apply_augmentation(batch_frames)
+                    # 先上 GPU，再做增强
                     images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
                     points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).unsqueeze(1).to(args.device)
                     point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)
                     gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
+
+                    # 在 GPU 上做增强
+                    gpu_frames = [{'image': images[i], 'gt_mask': gt_masks[i], 'point': points[i]} for i in range(len(batch_frames))]
+                    gpu_frames = apply_augmentation(gpu_frames)
+                    # 用增强后的 tensor 覆盖
+                    images = torch.stack([f['image'] for f in gpu_frames])
+                    points_flat = torch.stack([f['point'] for f in gpu_frames])
+                    points = points_flat.unsqueeze(1) if points_flat.dim() == 2 else points_flat
+                    gt_masks = torch.stack([f['gt_mask'] for f in gpu_frames])
 
                     if use_dual_opt and accum_count == 0:
                         optimizer.zero_grad()
