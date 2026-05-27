@@ -57,6 +57,12 @@ def parse_args():
                         help='启用FPS计时')
     parser.add_argument('--baseline', action='store_true',
                         help='测试原始冻结模型（基线对比）')
+    parser.add_argument('--reprompt', action='store_true',
+                        help='启用Re-prompting（面积突变+距离验证）')
+    parser.add_argument('--area-threshold', type=float, default=0.3,
+                        help='Re-prompting面积突变阈值')
+    parser.add_argument('--distance-threshold', type=int, default=10,
+                        help='Re-prompting距离验证阈值(px)')
     parser.add_argument('--device', type=str, default='cuda',
                         help='运行设备')
     return parser.parse_args()
@@ -143,12 +149,16 @@ def test_video(
     video_idx: int,
     output_dir: str = None,
     visualize: bool = False,
-    benchmark: bool = False
+    benchmark: bool = False,
+    reprompt: bool = False,
+    area_threshold: float = 0.3,
+    distance_threshold: int = 10
 ):
     """
     测试单个视频
 
     使用GT中心点作为prompt，测试SAM 2性能。
+    支持Re-prompting：面积突变 + 距离验证。
     """
     # 找第一个有效中心点
     prompt_idx = None
@@ -171,7 +181,7 @@ def test_video(
     )
     init_time = time.time() - init_start
 
-    # 注入Prompt
+    # 注入初始Prompt
     predictor.add_new_points(
         inference_state=inference_state,
         frame_idx=prompt_idx,
@@ -185,14 +195,42 @@ def test_video(
     video_segments = {}
     total_time = 0.0
     frame_times = []
+    prev_mask_area = None
+    last_point = prompt_point.flatten()  # (2,)
+    reprompt_count = 0
 
     for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
         frame_start = time.time()
 
         mask_logits = out_mask_logits[0]  # (1, H, W)
         pred_mask = (mask_logits > 0).cpu().numpy().squeeze()
+        current_area = pred_mask.sum()
 
         gt_mask = gt_masks[out_frame_idx] if out_frame_idx < len(gt_masks) else None
+
+        # Re-prompting: 面积突变 + 距离验证
+        if reprompt and prev_mask_area is not None and prev_mask_area > 0:
+            area_ratio = current_area / (prev_mask_area + 1e-6)
+            if area_ratio < area_threshold:
+                # 当前帧有GT中心点可用
+                if out_frame_idx < len(gt_centers) and gt_centers[out_frame_idx] is not None:
+                    new_center = gt_centers[out_frame_idx]
+                    new_point = np.array([new_center[0], new_center[1]])
+
+                    # 距离验证
+                    distance = np.linalg.norm(new_point - last_point)
+                    if distance > distance_threshold:
+                        predictor.add_new_points(
+                            inference_state=inference_state,
+                            frame_idx=out_frame_idx,
+                            obj_id=1,
+                            points=new_point.reshape(1, 2),
+                            labels=np.array([1], dtype=np.int32)
+                        )
+                        last_point = new_point
+                        reprompt_count += 1
+
+        prev_mask_area = current_area
 
         if gt_mask is not None:
             iou = compute_iou(
@@ -265,6 +303,7 @@ def test_video(
     return {
         'results': results,
         'video_segments': video_segments,
+        'reprompt_count': reprompt_count,
         'speed': {
             'init_time_s': init_time,
             'total_time_s': total_time,
@@ -318,7 +357,10 @@ def main():
         # 测试
         result = test_video(
             predictor, folder_path, gt_masks, gt_centers,
-            video_idx, str(output_dir), args.visualize, args.benchmark
+            video_idx, str(output_dir), args.visualize, args.benchmark,
+            reprompt=args.reprompt,
+            area_threshold=args.area_threshold,
+            distance_threshold=args.distance_threshold
         )
 
         if result is None:
@@ -342,6 +384,7 @@ def main():
             'folder': folder,
             'num_frames': len(frame_files),
             'mean_iou': np.mean([r['iou'] for r in frame_results if r['has_target']]),
+            'reprompt_count': result.get('reprompt_count', 0),
         }
 
         if speed_info:
@@ -380,6 +423,10 @@ def main():
     print(f"nIoU: {final_metrics['niou']:.4f}")
     print(f"Pd: {final_metrics['pd']:.4f}")
     print(f"Fa: {final_metrics['fa']:.4f}")
+
+    if args.reprompt:
+        total_rp = sum(r.get('reprompt_count', 0) for r in all_results)
+        print(f"Re-prompt 次数: {total_rp}")
 
     if args.benchmark:
         print("-" * 60)

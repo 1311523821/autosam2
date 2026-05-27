@@ -5,7 +5,7 @@ set -e
 
 BASE_DIR="/root/autosam2"
 TEST_LIST="/root/e2e/test1.txt"
-EPOCHS=15
+EPOCHS=50
 VAL_EVERY=3
 BATCH_SIZE=1
 
