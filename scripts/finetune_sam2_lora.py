@@ -525,17 +525,7 @@ def main():
 
                 # uint8 → float32 tensor
                 video_frames = [convert_to_tensor(f) for f in raw_frames]
-
-                # clip 模式：4帧一组（保持时序），否则单帧打乱
-                if args.finetune_memory != 'none':
-                    # clip 模式：按4帧滑动窗口分组
-                    clip_frames = []
-                    clip_size = 4
-                    for i in range(0, len(video_frames) - clip_size + 1, clip_size):
-                        clip_frames.append(video_frames[i:i + clip_size])
-                    video_frames = clip_frames  # 替换为 clip 列表
-                else:
-                    np.random.shuffle(video_frames)
+                np.random.shuffle(video_frames)
 
                 # 批次处理
                 batch_frames = []
@@ -547,50 +537,28 @@ def main():
                     if len(batch_frames) < args.batch_size and i < len(video_frames) - 1:
                         continue
 
-                    if args.finetune_memory != 'none':
-                        # Clip 模式：每个 item 是 4 帧的 list
-                        for clip in batch_frames:
-                            clip = apply_augmentation(clip)
-                            images = torch.stack([f['image'] for f in clip]).to(args.device)  # (4, 3, H, W)
-                            points = torch.from_numpy(np.stack([f['point'] for f in clip])).unsqueeze(1).to(args.device)  # (4,1,2)
-                            pl = torch.from_numpy(np.stack([f['point_label'] for f in clip])).to(args.device)  # (4,1)
-                            gt_masks = torch.stack([f['gt_mask'] for f in clip]).to(args.device)  # (4,1,H,W)
+                    # 数据增强 + 拼 batch
+                    batch_frames = apply_augmentation(batch_frames)
+                    images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
+                    points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).unsqueeze(1).to(args.device)
+                    point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)
+                    gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
 
-                            if use_dual_opt and accum_count == 0:
-                                optimizer.zero_grad()
-                                if adam_opt: adam_opt.zero_grad()
+                    if use_dual_opt and accum_count == 0:
+                        optimizer.zero_grad()
+                        if adam_opt:
+                            adam_opt.zero_grad()
 
-                            result = model.train_step(images, points, pl, gt_masks,
-                                                      optimizer, loss_fn, grad_clip=GRAD_CLIP,
-                                                      scaler=scaler if args.amp else None,
-                                                      second_optimizer=adam_opt if use_dual_opt else None,
-                                                      skip_step=(accum_count + 1 < args.grad_accum),
-                                                      clip_mode=True)
-                            accum_count += 1
-                            if accum_count >= args.grad_accum:
-                                accum_count = 0
-                    else:
-                        # 单帧模式：拼成 batch
-                        batch_frames = apply_augmentation(batch_frames)
-                        images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
-                        points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).unsqueeze(1).to(args.device)
-                        point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)
-                        gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
+                    result = model.train_step(images, points, point_labels, gt_masks,
+                                              optimizer, loss_fn, grad_clip=GRAD_CLIP,
+                                              scaler=scaler if args.amp else None,
+                                              second_optimizer=adam_opt if use_dual_opt else None,
+                                              skip_step=(accum_count + 1 < args.grad_accum))
+                    accum_count += 1
+                    if accum_count >= args.grad_accum:
+                        accum_count = 0
 
-                        if use_dual_opt and accum_count == 0:
-                            optimizer.zero_grad()
-                            if adam_opt: adam_opt.zero_grad()
-
-                        result = model.train_step(images, points, point_labels, gt_masks,
-                                                  optimizer, loss_fn, grad_clip=GRAD_CLIP,
-                                                  scaler=scaler if args.amp else None,
-                                                  second_optimizer=adam_opt if use_dual_opt else None,
-                                                  skip_step=(accum_count + 1 < args.grad_accum))
-                        accum_count += 1
-                        if accum_count >= args.grad_accum:
-                            accum_count = 0
-
-                    batch_frames = []  # 清空准备下一批
+                    batch_frames = []
 
                     if result['valid']:
                         epoch_loss += result['loss']
