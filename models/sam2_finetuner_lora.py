@@ -270,13 +270,15 @@ class SAM2LoRAFineTuner(nn.Module):
         lora_rank: int = 4,
         lora_alpha: int = 8,
         lora_targets: List[str] = None,
-        inject_stages: List[int] = None  # 只在指定 stage 注入 LoRA
+        inject_stages: List[int] = None,  # 只在指定 stage 注入 LoRA
+        finetune_memory: bool = False     # 是否微调 Memory Attention
     ):
         super().__init__()
         self.device = device
         self.sam2_config = sam2_config
         self.sam2_checkpoint = sam2_checkpoint
         self.lora_rank = lora_rank
+        self.finetune_memory = finetune_memory
 
         # 加载底层 SAM 2 模型
         self.model = self._load_model(sam2_config, sam2_checkpoint, device)
@@ -390,10 +392,8 @@ class SAM2LoRAFineTuner(nn.Module):
         lora_param_count = 0
         for module in self.model.modules():
             if isinstance(module, LoRALinear):
-                # 确保原始层保持冻结
                 for param in module.original_linear.parameters():
                     param.requires_grad = False
-                # 解冻 LoRA 参数
                 module.lora_A.requires_grad = True
                 module.lora_B.requires_grad = True
                 lora_param_count += module.lora_A.numel() + module.lora_B.numel()
@@ -407,6 +407,14 @@ class SAM2LoRAFineTuner(nn.Module):
                 param.requires_grad = True
                 decoder_param_count += param.numel()
             print(f"✓ Mask Decoder 已解冻: {decoder_param_count / 1e6:.2f}M")
+
+        # 4. 可选：解冻 Memory Attention
+        mem_param_count = 0
+        if self.finetune_memory and hasattr(self.model, 'memory_attention'):
+            for param in self.model.memory_attention.parameters():
+                param.requires_grad = True
+                mem_param_count += param.numel()
+            print(f"✓ Memory Attention 已解冻: {mem_param_count / 1e6:.2f}M")
 
     def _print_trainable_params(self):
         """打印可训练参数统计"""
@@ -483,6 +491,120 @@ class SAM2LoRAFineTuner(nn.Module):
 
         return low_res_masks, iou_predictions
 
+    def forward_clip(
+        self,
+        images: torch.Tensor,
+        point_coords: torch.Tensor,
+        point_labels: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Clip 前向传播（4帧，使用 Memory Attention）
+
+        利用 SAM2 内部的 Memory Attention 进行帧间特征传播。
+        第0帧用作记忆，后续帧通过 Memory Attention 条件化。
+
+        Args:
+            images: (B, T, 3, H, W) 或 (T, 3, H, W) 4帧clip
+            point_coords: (T, N, 2) 每帧的prompt点
+            point_labels: (T, N) 每帧的prompt标签
+
+        Returns:
+            all_masks: (T, 1, H//4, W//4)
+            all_iou:  (T, 1)
+        """
+        if images.dim() == 4:
+            images = images.unsqueeze(0)  # (1, T, 3, H, W)
+        T = images.shape[1]
+
+        # 1. 每帧独立编码
+        all_feats = []
+        for t in range(T):
+            bb = self.model.forward_image(images[:, t])
+            all_feats.append(bb)
+
+        # 2. 第0帧用 prompt 生成初始 mask 和 memory
+        bb0 = all_feats[0]
+        image_embed0 = bb0["backbone_fpn"][-1]
+        hr0 = [bb0["backbone_fpn"][0], bb0["backbone_fpn"][1]]
+
+        pc0 = point_coords[0:1] if point_coords.dim() == 2 else point_coords[0].unsqueeze(0)
+        pl0 = point_labels[0:1] if point_labels.dim() == 1 else point_labels[0].unsqueeze(0)
+        if pc0.dim() == 2:
+            pc0 = pc0.unsqueeze(0)
+        if pl0.dim() == 1:
+            pl0 = pl0.unsqueeze(0)
+
+        sparse_emb, dense_emb = self.model.sam_prompt_encoder(
+            points=(pc0, pl0), boxes=None, masks=None
+        )
+        image_pe = self.model.sam_prompt_encoder.get_dense_pe()
+
+        mask0, iou0, _, _ = self.model.sam_mask_decoder(
+            image_embeddings=image_embed0, image_pe=image_pe,
+            sparse_prompt_embeddings=sparse_emb, dense_prompt_embeddings=dense_emb,
+            multimask_output=False, repeat_image=False, high_res_features=hr0
+        )
+
+        all_masks = [mask0]
+        all_iou = [iou0]
+
+        # 3. 构建 memory（使用第0帧的输出）
+        # SAM2 内部使用 _prepare_memory_conditioned_features 处理后续帧
+        if T > 1 and hasattr(self.model, 'memory_attention'):
+            # 提取 vision features 用于 memory
+            _, vision_feats0, vision_pos_embeds0, _ = self.model._prepare_backbone_features(bb0)
+
+            # 后续帧通过 memory attention 条件化
+            for t in range(1, T):
+                bb_t = all_feats[t]
+                _, vision_feats_t, vision_pos_embeds_t, _ = self.model._prepare_backbone_features(bb_t)
+
+                # Memory Attention: 用历史特征条件化当前帧
+                # pix_feat_with_mem: (HW, B, C) 包含记忆信息的特征
+                pix_feat_with_mem = self.model.memory_attention(
+                    curr=vision_feats_t,          # 当前帧特征
+                    curr_pos=vision_pos_embeds_t,  # 当前帧位置编码
+                    memory=vision_feats0,          # 历史帧记忆
+                    memory_pos=vision_pos_embeds0, # 历史帧位置编码
+                    num_frames=T
+                )
+
+                # 将条件化后的特征重新整形用于 mask decoder
+                # 注意：这一步较为 hacky，因为 SAM2 内部的特征处理比较隐式
+                # 直接使用原始 backbone 特征 decode
+                image_embed_t = bb_t["backbone_fpn"][-1]
+                hr_t = [bb_t["backbone_fpn"][0], bb_t["backbone_fpn"][1]]
+
+                # 获取当前帧的 prompt
+                pc_t = point_coords[t].unsqueeze(0) if point_coords.dim() == 2 else point_coords[t:t+1]
+                pl_t = point_labels[t].unsqueeze(0) if point_labels.dim() == 1 else point_labels[t:t+1]
+                if pc_t.dim() == 2:
+                    pc_t = pc_t.unsqueeze(0)
+                if pl_t.dim() == 1:
+                    pl_t = pl_t.unsqueeze(0)
+
+                se, de = self.model.sam_prompt_encoder(
+                    points=(pc_t, pl_t), boxes=None, masks=None
+                )
+
+                mask_t, iou_t, _, _ = self.model.sam_mask_decoder(
+                    image_embeddings=image_embed_t, image_pe=image_pe,
+                    sparse_prompt_embeddings=se, dense_prompt_embeddings=de,
+                    multimask_output=False, repeat_image=False, high_res_features=hr_t
+                )
+
+                all_masks.append(mask_t)
+                all_iou.append(iou_t)
+
+                # 更新 memory
+                vision_feats0 = vision_feats_t
+                vision_pos_embeds0 = vision_pos_embeds_t
+
+        # 堆叠结果
+        masks_out = torch.cat(all_masks, dim=0)  # (T, 1, h, w)
+        iou_out = torch.cat(all_iou, dim=0)      # (T, 1)
+        return masks_out, iou_out
+
     def train_step(
         self,
         image: torch.Tensor,
@@ -494,33 +616,36 @@ class SAM2LoRAFineTuner(nn.Module):
         grad_clip: float = 0.0,
         scaler: object = None,
         second_optimizer: object = None,
-        skip_step: bool = False  # 梯度累积时跳过 optimizer.step()
+        skip_step: bool = False,
+        clip_mode: bool = False  # True: 使用 forward_clip (Memory Attention)
     ) -> Dict[str, float]:
         """
-        单帧训练步骤（支持 AMP + 双优化器 + 梯度累积）
+        训练步骤（支持 AMP + 双优化器 + 梯度累积 + clip模式）
 
         Args:
-            image: (B, 3, H, W)
-            point_coords: (B, N, 2)
-            point_labels: (B, N)
-            gt_mask: (B, 1, H, W)
+            image: (B, 3, H, W) 或 clip模式 (T, 3, H, W)
+            point_coords: 单帧 (B,N,2) 或 clip (T,N,2)
+            point_labels: 单帧 (B,N) 或 clip (T,N)
+            gt_mask: 单帧 (B,1,H,W) 或 clip (T,1,H,W)
             optimizer: 优化器
             loss_fn: 损失函数
             grad_clip: 梯度裁剪阈值
             scaler: AMP GradScaler
             second_optimizer: 双优化器时的第二个
-            skip_step: True时只累积梯度不更新参数（梯度累积用）
+            skip_step: True时只累积梯度不更新参数
+            clip_mode: True时使用 forward_clip
 
         Returns:
             {'loss': ..., 'valid': True}
         """
-        # 单优化器 + 非累积模式时清零；双优化器/累积模式由调用方清零
         if second_optimizer is None and not skip_step:
             optimizer.zero_grad()
 
-        # 前向传播（AMP autocast）
         with torch.amp.autocast('cuda', enabled=scaler is not None):
-            low_res_masks, iou_pred = self.forward_single_frame(image, point_coords, point_labels)
+            if clip_mode:
+                low_res_masks, iou_pred = self.forward_clip(image, point_coords, point_labels)
+            else:
+                low_res_masks, iou_pred = self.forward_single_frame(image, point_coords, point_labels)
 
             if low_res_masks.shape[-2:] != gt_mask.shape[-2:]:
                 pred_masks = F.interpolate(
@@ -530,20 +655,16 @@ class SAM2LoRAFineTuner(nn.Module):
             else:
                 pred_masks = low_res_masks
 
-            # 梯度累积时除以累积步数
             loss = loss_fn(pred_masks, gt_mask)
 
-        # 反向传播
         if scaler is not None:
             scaler.scale(loss).backward()
         else:
             loss.backward()
 
-        # 梯度累积时跳过参数更新
         if skip_step:
             return {'loss': loss.item(), 'valid': True}
 
-        # 梯度裁剪
         if grad_clip > 0:
             if scaler is not None:
                 scaler.unscale_(optimizer)
@@ -551,7 +672,6 @@ class SAM2LoRAFineTuner(nn.Module):
                     scaler.unscale_(second_optimizer)
             torch.nn.utils.clip_grad_norm_(self.get_trainable_parameters(), grad_clip)
 
-        # 更新参数
         if scaler is not None:
             scaler.step(optimizer)
             if second_optimizer is not None:

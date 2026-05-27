@@ -57,6 +57,8 @@ def parse_args():
     parser.add_argument('--loss-type', type=str, default='tversky',
                         choices=['dice', 'tversky'],
                         help='分割损失函数: dice 或 tversky (对小目标更友好)')
+    parser.add_argument('--finetune-memory', action='store_true',
+                        help='同时微调Memory Attention（需要clip训练模式）')
     parser.add_argument('--image-size', type=int, default=1024,
                         help='训练图像分辨率（必须为1024，SAM2的内部分辨率硬编码）')
     parser.add_argument('--batch-size', type=int, default=8,
@@ -415,7 +417,8 @@ def main():
         sam2_checkpoint=args.sam2_ckpt,
         device=args.device,
         lora_rank=args.lora_rank,
-        lora_alpha=args.lora_alpha
+        lora_alpha=args.lora_alpha,
+        finetune_memory=args.finetune_memory
     )
 
     # 优化器
@@ -519,43 +522,72 @@ def main():
                 if not raw_frames:
                     continue
 
-                # uint8 → float32 tensor + 视频内打乱
+                # uint8 → float32 tensor
                 video_frames = [convert_to_tensor(f) for f in raw_frames]
-                np.random.shuffle(video_frames)
 
-                # 批次处理：batch_size 帧拼成一个 tensor
+                # clip 模式：4帧一组（保持时序），否则单帧打乱
+                if args.finetune_memory:
+                    # clip 模式：按4帧滑动窗口分组
+                    clip_frames = []
+                    clip_size = 4
+                    for i in range(0, len(video_frames) - clip_size + 1, clip_size):
+                        clip_frames.append(video_frames[i:i + clip_size])
+                    video_frames = clip_frames  # 替换为 clip 列表
+                else:
+                    np.random.shuffle(video_frames)
+
+                # 批次处理
                 batch_frames = []
                 accum_count = 0
 
-                for i, frame_data in enumerate(video_frames):
-                    batch_frames.append(frame_data)
+                for i, item in enumerate(video_frames):
+                    batch_frames.append(item)
 
                     if len(batch_frames) < args.batch_size and i < len(video_frames) - 1:
                         continue
 
-                    # 数据增强（仅训练时）
-                    batch_frames = apply_augmentation(batch_frames)
+                    if args.finetune_memory:
+                        # Clip 模式：每个 item 是 4 帧的 list
+                        for clip in batch_frames:
+                            clip = apply_augmentation(clip)
+                            images = torch.stack([f['image'] for f in clip]).to(args.device)  # (4, 3, H, W)
+                            points = torch.from_numpy(np.stack([f['point'] for f in clip])).unsqueeze(1).to(args.device)  # (4,1,2)
+                            pl = torch.from_numpy(np.stack([f['point_label'] for f in clip])).to(args.device)  # (4,1)
+                            gt_masks = torch.stack([f['gt_mask'] for f in clip]).to(args.device)  # (4,1,H,W)
 
-                    # 拼接 batch
-                    images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
-                    points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).unsqueeze(1).to(args.device)  # (B,2)→(B,1,2)
-                    point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)  # (B,1) - 2 dims
-                    gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
+                            if use_dual_opt and accum_count == 0:
+                                optimizer.zero_grad()
+                                if adam_opt: adam_opt.zero_grad()
 
-                    # 双优化器时，在每个累积周期开始时清零梯度
-                    if use_dual_opt and accum_count == 0:
-                        optimizer.zero_grad()
-                        if adam_opt:
-                            adam_opt.zero_grad()
+                            result = model.train_step(images, points, pl, gt_masks,
+                                                      optimizer, loss_fn, grad_clip=GRAD_CLIP,
+                                                      scaler=scaler if args.amp else None,
+                                                      second_optimizer=adam_opt if use_dual_opt else None,
+                                                      skip_step=(accum_count + 1 < args.grad_accum),
+                                                      clip_mode=True)
+                            accum_count += 1
+                            if accum_count >= args.grad_accum:
+                                accum_count = 0
+                    else:
+                        # 单帧模式：拼成 batch
+                        batch_frames = apply_augmentation(batch_frames)
+                        images = torch.stack([f['image'] for f in batch_frames]).to(args.device)
+                        points = torch.from_numpy(np.stack([f['point'] for f in batch_frames])).unsqueeze(1).to(args.device)
+                        point_labels = torch.from_numpy(np.stack([f['point_label'] for f in batch_frames])).to(args.device)
+                        gt_masks = torch.stack([f['gt_mask'] for f in batch_frames]).to(args.device)
 
-                    result = model.train_step(images, points, point_labels, gt_masks,
-                                              optimizer, loss_fn, grad_clip=GRAD_CLIP,
-                                              scaler=scaler if args.amp else None,
-                                              second_optimizer=adam_opt if use_dual_opt else None,
-                                              skip_step=(accum_count + 1 < args.grad_accum))
-                    accum_count += 1
-                    if accum_count >= args.grad_accum:
-                        accum_count = 0
+                        if use_dual_opt and accum_count == 0:
+                            optimizer.zero_grad()
+                            if adam_opt: adam_opt.zero_grad()
+
+                        result = model.train_step(images, points, point_labels, gt_masks,
+                                                  optimizer, loss_fn, grad_clip=GRAD_CLIP,
+                                                  scaler=scaler if args.amp else None,
+                                                  second_optimizer=adam_opt if use_dual_opt else None,
+                                                  skip_step=(accum_count + 1 < args.grad_accum))
+                        accum_count += 1
+                        if accum_count >= args.grad_accum:
+                            accum_count = 0
 
                     batch_frames = []  # 清空准备下一批
 
