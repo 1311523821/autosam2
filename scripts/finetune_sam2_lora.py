@@ -147,6 +147,58 @@ class SonarFrameDataset(Dataset):
         )
 
 # ============================================================
+# Clip Dataset (4帧一组，用于Memory Attention训练)
+# ============================================================
+class SonarClipDataset(Dataset):
+    IMG_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    IMG_STD  = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+    def __init__(self, folders, data_root, target_label, image_size, clip_len=4):
+        self.image_size = image_size; self.target_label = target_label; self.clip_len = clip_len
+        self.clips = []  # [(folder_path, [img_files])]
+        for folder in tqdm(folders, desc="构建Clip数据集"):
+            d = os.path.join(data_root, folder)
+            if not os.path.isdir(d): continue
+            files = sorted([f for f in os.listdir(d) if f.lower().endswith(('.png','.jpg','.jpeg'))])
+            has_json = [os.path.exists(os.path.join(d, os.path.splitext(f)[0]+'.json')) for f in files]
+            valid = [f for f, ok in zip(files, has_json) if ok]
+            for i in range(0, len(valid) - clip_len + 1, clip_len):
+                self.clips.append((d, valid[i:i+clip_len]))
+
+    def __len__(self): return len(self.clips)
+
+    def _load_one(self, folder_path, img_file, json_path):
+        img = cv2.imread(os.path.join(folder_path, img_file), cv2.IMREAD_GRAYSCALE)
+        h, w = img.shape
+        mask = np.zeros((h,w), dtype=np.uint8)
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        for s in data.get('shapes',[]):
+            if s['label'] == self.target_label:
+                cv2.fillPoly(mask, [np.array(s['points'],np.float32).astype(np.int32)], 1)
+
+        center = get_mask_center(torch.from_numpy(mask)) if mask.sum() > 0 else None
+        sx, sy = self.image_size/w, self.image_size/h
+        img_r = cv2.resize(img, (self.image_size, self.image_size))
+        mask_r = cv2.resize(mask, (self.image_size, self.image_size), interpolation=cv2.INTER_NEAREST)
+        img_t = torch.from_numpy(img_r).float() / 255.0
+        img_t = img_t.unsqueeze(0).expand(3, -1, -1)
+        img_t = (img_t - self.IMG_MEAN) / self.IMG_STD
+        return img_t, np.array([center[0]*sx, center[1]*sy] if center else [0,0], dtype=np.float32), \
+               np.array([1] if center else [0], dtype=np.int64), torch.from_numpy(mask_r).float().unsqueeze(0)
+
+    def __getitem__(self, idx):
+        folder, files = self.clips[idx]
+        images, points, labels, masks = [], [], [], []
+        for f in files:
+            j = os.path.join(folder, os.path.splitext(f)[0] + '.json')
+            img, pt, lb, mk = self._load_one(folder, f, j)
+            images.append(img); points.append(pt); labels.append(lb); masks.append(mk)
+        # (T, 3, H, W), (T, 2), (T, 1), (T, 1, H, W)
+        return torch.stack(images), torch.from_numpy(np.stack(points)), \
+               torch.from_numpy(np.stack(labels)), torch.stack(masks)
+
+# ============================================================
 # 验证 (简单版，只看 loss)
 # ============================================================
 def compute_iou(pred, gt, t=0.5):
@@ -213,14 +265,23 @@ def main():
     print(f"Loss: {args.loss_type}, optimizer: {args.optimizer}")
     print(f"Batch: {args.batch_size}, grad_accum: {args.grad_accum}")
 
-    # DataLoader
-    train_ds = SonarFrameDataset(train_folders, args.data_root, args.target_label, args.image_size)
-    val_ds   = SonarFrameDataset(test_folders, args.data_root, args.target_label, args.image_size)
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers, pin_memory=True)
-    val_loader   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
-                              num_workers=args.num_workers, pin_memory=True)
-    print(f"训练帧: {len(train_ds)}, 验证帧: {len(val_ds)}")
+    # DataLoader（clip模式或单帧模式）
+    clip_mode = (args.finetune_memory != 'none')
+    if clip_mode:
+        train_ds = SonarClipDataset(train_folders, args.data_root, args.target_label, args.image_size)
+        val_ds   = SonarFrameDataset(test_folders, args.data_root, args.target_label, args.image_size)
+        train_loader = DataLoader(train_ds, batch_size=1, shuffle=True,
+                                  num_workers=args.num_workers, pin_memory=True)
+        print(f"训练clips: {len(train_ds)}, 验证帧: {len(val_ds)}")
+    else:
+        train_ds = SonarFrameDataset(train_folders, args.data_root, args.target_label, args.image_size)
+        val_ds   = SonarFrameDataset(test_folders, args.data_root, args.target_label, args.image_size)
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                                  num_workers=args.num_workers, pin_memory=True)
+        print(f"训练帧: {len(train_ds)}, 验证帧: {len(val_ds)}")
+
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
+                            num_workers=args.num_workers, pin_memory=True)
 
     # 模型
     inject_stages = [int(s) for s in args.lora_stages.split(',')]
@@ -282,16 +343,24 @@ def main():
 
         pbar = tqdm(train_loader, desc=f"训练 Epoch {epoch}")
         for images, pts_np, lbls_np, gt in pbar:
-            images = images.to(args.device, non_blocking=True)
-            pts = pts_np.unsqueeze(1).to(args.device, non_blocking=True)
-            lbls = lbls_np.to(args.device, non_blocking=True)
-            gt = gt.to(args.device, non_blocking=True)
+            # clip模式：squeeze掉DataLoader加的batch维度
+            if clip_mode:
+                images = images.squeeze(0).to(args.device, non_blocking=True)  # (T,3,H,W)
+                pts = pts_np.squeeze(0).unsqueeze(1).to(args.device, non_blocking=True)  # (T,1,2)
+                lbls = lbls_np.squeeze(0).to(args.device, non_blocking=True)  # (T,1)
+                gt = gt.squeeze(0).to(args.device, non_blocking=True)  # (T,1,H,W)
+            else:
+                images = images.to(args.device, non_blocking=True)
+                pts = pts_np.unsqueeze(1).to(args.device, non_blocking=True)
+                lbls = lbls_np.to(args.device, non_blocking=True)
+                gt = gt.to(args.device, non_blocking=True)
 
-            # GPU 增强
-            gf = [{'image':images[i], 'gt_mask':gt[i], 'point':pts[i]} for i in range(len(images))]
-            gf = apply_augmentation(gf)
-            images = torch.stack([x['image'] for x in gf])
-            pts    = torch.stack([x['point'] for x in gf])
+            # GPU 增强（clip模式不增强）
+            if not clip_mode:
+                gf = [{'image':images[i], 'gt_mask':gt[i], 'point':pts[i]} for i in range(len(images))]
+                gf = apply_augmentation(gf)
+                images = torch.stack([x['image'] for x in gf])
+                pts    = torch.stack([x['point'] for x in gf])
 
             if use_dual and acc == 0:
                 optimizer.zero_grad()
@@ -300,7 +369,8 @@ def main():
             r = model.train_step(images, pts, lbls, gt, optimizer, loss_fn,
                                  grad_clip=GRAD_CLIP, scaler=scaler,
                                  second_optimizer=adam_opt if use_dual else None,
-                                 skip_step=(acc+1 < args.grad_accum))
+                                 skip_step=(acc+1 < args.grad_accum),
+                                 clip_mode=clip_mode)
 
             acc += 1
             if acc >= args.grad_accum: acc = 0

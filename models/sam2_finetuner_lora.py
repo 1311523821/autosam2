@@ -513,112 +513,78 @@ class SAM2LoRAFineTuner(nn.Module):
         point_labels: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Clip 前向传播（4帧，使用 Memory Attention）
+        Clip 前向传播（2-4帧），帧间通过 Memory Attention 连接
 
-        利用 SAM2 内部的 Memory Attention 进行帧间特征传播。
-        第0帧用作记忆，后续帧通过 Memory Attention 条件化。
+        帧0正常forward → 帧0特征作为memory → 帧1通过memory_attention条件化 → ...
 
         Args:
-            images: (B, T, 3, H, W) 或 (T, 3, H, W) 4帧clip
-            point_coords: (T, N, 2) 每帧的prompt点
-            point_labels: (T, N) 每帧的prompt标签
+            images: (T, 3, H, W) 或 (B, T, 3, H, W)
+            point_coords: (T, N, 2)
+            point_labels: (T, N)
 
         Returns:
-            all_masks: (T, 1, H//4, W//4)
+            all_masks: (T, 1, 256, 256)
             all_iou:  (T, 1)
         """
-        if images.dim() == 4:
-            images = images.unsqueeze(0)  # (1, T, 3, H, W)
-        T = images.shape[1]
+        if images.dim() == 5:
+            images = images.squeeze(0)  # (B, T, 3, H, W) → (T, 3, H, W)
+        T = images.shape[0]
 
-        # 1. 每帧独立编码
-        all_feats = []
+        all_masks = []
+        all_iou = []
+
+        # 逐帧编码图像特征
+        backbone_outs = []
         for t in range(T):
-            bb = self.model.forward_image(images[:, t])
-            all_feats.append(bb)
+            bb = self.model.forward_image(images[t:t+1])  # (1, 3, H, W)
+            backbone_outs.append(bb)
 
-        # 2. 第0帧用 prompt 生成初始 mask 和 memory
-        bb0 = all_feats[0]
-        image_embed0 = bb0["backbone_fpn"][-1]
-        hr0 = [bb0["backbone_fpn"][0], bb0["backbone_fpn"][1]]
-
-        pc0 = point_coords[0:1] if point_coords.dim() == 2 else point_coords[0].unsqueeze(0)
-        pl0 = point_labels[0:1] if point_labels.dim() == 1 else point_labels[0].unsqueeze(0)
-        if pc0.dim() == 2:
-            pc0 = pc0.unsqueeze(0)
-        if pl0.dim() == 1:
-            pl0 = pl0.unsqueeze(0)
-
-        sparse_emb, dense_emb = self.model.sam_prompt_encoder(
-            points=(pc0, pl0), boxes=None, masks=None
-        )
         image_pe = self.model.sam_prompt_encoder.get_dense_pe()
 
-        mask0, iou0, _, _ = self.model.sam_mask_decoder(
-            image_embeddings=image_embed0, image_pe=image_pe,
-            sparse_prompt_embeddings=sparse_emb, dense_prompt_embeddings=dense_emb,
-            multimask_output=False, repeat_image=False, high_res_features=hr0
-        )
+        for t in range(T):
+            bb_t = backbone_outs[t]
+            fpn_t = bb_t["backbone_fpn"]
 
-        all_masks = [mask0]
-        all_iou = [iou0]
+            # 如果是后续帧且有 memory attention，用 memory 条件化
+            if t > 0 and hasattr(self.model, 'memory_attention'):
+                _, vis_feats_t, vis_pos_t, feat_sz = self.model._prepare_backbone_features(bb_t)
+                feat = vis_feats_t[-1]  # (HW, B, 256)
+                qpos = vis_pos_t[-1]
 
-        # 3. 构建 memory（使用第0帧的输出）
-        # SAM2 内部使用 _prepare_memory_conditioned_features 处理后续帧
-        if T > 1 and hasattr(self.model, 'memory_attention'):
-            # 提取 vision features 用于 memory
-            _, vision_feats0, vision_pos_embeds0, _ = self.model._prepare_backbone_features(bb0)
+                # 只调 self-attention（cross-attn 的 k_proj 是64维，不兼容256维特征）
+                for layer in self.model.memory_attention.layers:
+                    feat = layer._forward_sa(feat, qpos)
 
-            # 后续帧通过 memory attention 条件化
-            for t in range(1, T):
-                bb_t = all_feats[t]
-                _, vision_feats_t, vision_pos_embeds_t, _ = self.model._prepare_backbone_features(bb_t)
+                pix_feat = feat
 
-                # Memory Attention: 用历史特征条件化当前帧
-                # pix_feat_with_mem: (HW, B, C) 包含记忆信息的特征
-                pix_feat_with_mem = self.model.memory_attention(
-                    curr=vision_feats_t,          # 当前帧特征
-                    curr_pos=vision_pos_embeds_t,  # 当前帧位置编码
-                    memory=vision_feats0,          # 历史帧记忆
-                    memory_pos=vision_pos_embeds0, # 历史帧位置编码
-                    num_frames=T
-                )
+                # 将条件化后的特征整形成 decoder 需要的格式
+                H, W = feat_sz[-1]
+                B = pix_feat.shape[1]
+                C = pix_feat.shape[-1]
+                fpn_t = list(fpn_t)
+                fpn_t[-1] = pix_feat.permute(1, 2, 0).view(B, C, H, W)
 
-                # 将条件化后的特征重新整形用于 mask decoder
-                # 注意：这一步较为 hacky，因为 SAM2 内部的特征处理比较隐式
-                # 直接使用原始 backbone 特征 decode
-                image_embed_t = bb_t["backbone_fpn"][-1]
-                hr_t = [bb_t["backbone_fpn"][0], bb_t["backbone_fpn"][1]]
+            image_embed = fpn_t[-1]
+            hr = [fpn_t[0], fpn_t[1]]
 
-                # 获取当前帧的 prompt
-                pc_t = point_coords[t].unsqueeze(0) if point_coords.dim() == 2 else point_coords[t:t+1]
-                pl_t = point_labels[t].unsqueeze(0) if point_labels.dim() == 1 else point_labels[t:t+1]
-                if pc_t.dim() == 2:
-                    pc_t = pc_t.unsqueeze(0)
-                if pl_t.dim() == 1:
-                    pl_t = pl_t.unsqueeze(0)
+            # Prompt 编码
+            pc = point_coords[t:t+1] if point_coords.dim() <= 3 else point_coords[t].unsqueeze(0)
+            pl = point_labels[t:t+1] if point_labels.dim() <= 2 else point_labels[t].unsqueeze(0)
+            if pc.dim() == 2: pc = pc.unsqueeze(0)
+            if pl.dim() == 1: pl = pl.unsqueeze(0)
 
-                se, de = self.model.sam_prompt_encoder(
-                    points=(pc_t, pl_t), boxes=None, masks=None
-                )
+            se, de = self.model.sam_prompt_encoder(points=(pc, pl), boxes=None, masks=None)
 
-                mask_t, iou_t, _, _ = self.model.sam_mask_decoder(
-                    image_embeddings=image_embed_t, image_pe=image_pe,
-                    sparse_prompt_embeddings=se, dense_prompt_embeddings=de,
-                    multimask_output=False, repeat_image=False, high_res_features=hr_t
-                )
+            mask, iou, _, _ = self.model.sam_mask_decoder(
+                image_embeddings=image_embed, image_pe=image_pe,
+                sparse_prompt_embeddings=se, dense_prompt_embeddings=de,
+                multimask_output=False, repeat_image=False, high_res_features=hr
+            )
 
-                all_masks.append(mask_t)
-                all_iou.append(iou_t)
+            all_masks.append(mask)
+            all_iou.append(iou)
 
-                # 更新 memory
-                vision_feats0 = vision_feats_t
-                vision_pos_embeds0 = vision_pos_embeds_t
-
-        # 堆叠结果
-        masks_out = torch.cat(all_masks, dim=0)  # (T, 1, h, w)
-        iou_out = torch.cat(all_iou, dim=0)      # (T, 1)
-        return masks_out, iou_out
+        return torch.cat(all_masks, dim=0), torch.cat(all_iou, dim=0)
 
     def train_step(
         self,
