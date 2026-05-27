@@ -271,13 +271,14 @@ class SAM2LoRAFineTuner(nn.Module):
         lora_alpha: int = 8,
         lora_targets: List[str] = None,
         inject_stages: List[int] = None,  # 只在指定 stage 注入 LoRA
-        finetune_memory: bool = False     # 是否微调 Memory Attention
+        finetune_memory: str = 'none'     # 'none', 'full', 'lora'
     ):
         super().__init__()
         self.device = device
         self.sam2_config = sam2_config
         self.sam2_checkpoint = sam2_checkpoint
         self.lora_rank = lora_rank
+        self.lora_alpha = lora_alpha
         self.finetune_memory = finetune_memory
 
         # 加载底层 SAM 2 模型
@@ -408,13 +409,24 @@ class SAM2LoRAFineTuner(nn.Module):
                 decoder_param_count += param.numel()
             print(f"✓ Mask Decoder 已解冻: {decoder_param_count / 1e6:.2f}M")
 
-        # 4. 可选：解冻 Memory Attention
+        # 4. 可选：Memory Attention 微调
         mem_param_count = 0
-        if self.finetune_memory and hasattr(self.model, 'memory_attention'):
-            for param in self.model.memory_attention.parameters():
-                param.requires_grad = True
-                mem_param_count += param.numel()
-            print(f"✓ Memory Attention 已解冻: {mem_param_count / 1e6:.2f}M")
+        if self.finetune_memory != 'none' and hasattr(self.model, 'memory_attention'):
+            if self.finetune_memory == 'lora':
+                # Memory Attention 使用 q_proj/k_proj/v_proj/out_proj，不是 qkv/proj
+                n = inject_lora_to_linear(self.model.memory_attention,
+                                         ['q_proj', 'k_proj', 'v_proj', 'out_proj'],
+                                         r=self.lora_rank, lora_alpha=self.lora_alpha)
+                print(f"  注入 {n} 个 LoRA 层到 Memory Attention")
+                # 重新统计
+                for m in self.model.modules():
+                    if isinstance(m, LoRALinear) and any(p.requires_grad for p in m.parameters()):
+                        mem_param_count += m.lora_A.numel() + m.lora_B.numel()
+            else:
+                for param in self.model.memory_attention.parameters():
+                    param.requires_grad = True
+                    mem_param_count += param.numel()
+            print(f"✓ Memory Attention 已解冻: {mem_param_count / 1e6:.2f}M ({self.finetune_memory})")
 
     def _print_trainable_params(self):
         """打印可训练参数统计"""

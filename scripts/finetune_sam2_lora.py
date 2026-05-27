@@ -57,8 +57,9 @@ def parse_args():
     parser.add_argument('--loss-type', type=str, default='tversky',
                         choices=['dice', 'tversky'],
                         help='分割损失函数: dice 或 tversky (对小目标更友好)')
-    parser.add_argument('--finetune-memory', action='store_true',
-                        help='同时微调Memory Attention（需要clip训练模式）')
+    parser.add_argument('--finetune-memory', type=str, default='none',
+                        choices=['none', 'full', 'lora'],
+                        help='Memory Attention微调: none=冻结, full=全量, lora=LoRA (在q/k/v/out_proj注入)')
     parser.add_argument('--image-size', type=int, default=1024,
                         help='训练图像分辨率（必须为1024，SAM2的内部分辨率硬编码）')
     parser.add_argument('--batch-size', type=int, default=8,
@@ -526,7 +527,7 @@ def main():
                 video_frames = [convert_to_tensor(f) for f in raw_frames]
 
                 # clip 模式：4帧一组（保持时序），否则单帧打乱
-                if args.finetune_memory:
+                if args.finetune_memory != 'none':
                     # clip 模式：按4帧滑动窗口分组
                     clip_frames = []
                     clip_size = 4
@@ -546,7 +547,7 @@ def main():
                     if len(batch_frames) < args.batch_size and i < len(video_frames) - 1:
                         continue
 
-                    if args.finetune_memory:
+                    if args.finetune_memory != 'none':
                         # Clip 模式：每个 item 是 4 帧的 list
                         for clip in batch_frames:
                             clip = apply_augmentation(clip)
