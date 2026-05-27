@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM2 Memory Attention 微调：困难与解决</title>
+    <style>
+        :root {
+            --bg: #0d1117; --card: #161b22; --border: #30363d;
+            --text: #c9d1d9; --text2: #8b949e;
+            --accent: #58a6ff; --green: #3fb950; --orange: #d2991d;
+            --red: #f85149; --purple: #a371f7; --code-bg: #1c2128;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text); line-height: 1.7; font-size: 15px;
+        }
+        header {
+            background: linear-gradient(135deg, #0d1117 0%, #1a2332 50%, #0d2137 100%);
+            border-bottom: 1px solid var(--border); padding: 60px 20px; text-align: center;
+        }
+        header h1 { font-size: 2.2rem; background: linear-gradient(135deg, var(--accent), var(--purple));
+                     -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 12px; }
+        header p { color: var(--text2); font-size: 1.1rem; max-width: 700px; margin: 0 auto; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .section { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+                   margin: 28px 0; padding: 32px; }
+        .section h2 { font-size: 1.4rem; margin-bottom: 20px; padding-bottom: 12px;
+                      border-bottom: 1px solid var(--border); }
+        .section h3 { font-size: 1.1rem; margin: 24px 0 12px; color: var(--accent); }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+        th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+        th { background: var(--code-bg); font-weight: 600; }
+        .diagram { background: var(--code-bg); border: 1px solid var(--border);
+                   border-radius: 8px; margin: 16px 0; padding: 20px; overflow-x: auto;
+                   font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.5;
+                   white-space: pre; }
+        .diagram .c { color: var(--text2); } .diagram .k { color: var(--accent); }
+        .diagram .g { color: var(--green); } .diagram .o { color: var(--orange); }
+        .diagram .r { color: var(--red); } .diagram .p { color: var(--purple); }
+        pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+              padding: 16px; overflow-x: auto; font-size: 13px; margin: 12px 0; }
+        code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; color: var(--orange); }
+        pre code { background: none; padding: 0; color: var(--text); }
+        .timeline { position: relative; padding-left: 32px; }
+        .timeline::before { content: ''; position: absolute; left: 12px; top: 0; bottom: 0;
+                            width: 2px; background: var(--border); }
+        .tl-item { position: relative; margin-bottom: 24px; }
+        .tl-item::before { content: ''; position: absolute; left: -24px; top: 6px;
+                           width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+        .tl-item.fail::before { background: var(--red); }
+        .tl-item.ok::before { background: var(--green); }
+        .warning { background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.3);
+                   border-radius: 8px; padding: 14px 18px; margin: 16px 0; }
+        .warning::before { content: "⚠️ 注意: "; color: var(--red); }
+        .ok-box { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3);
+                  border-radius: 8px; padding: 14px 18px; margin: 16px 0; }
+        footer { text-align: center; padding: 30px; color: var(--text2); font-size: 13px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>SAM2 Memory Attention 微调：困难与解决</h1>
+    <p>记录在声呐 B-scan 数据上微调 Memory Attention 遇到的技术问题和解决方案</p>
+</header>
+
+<div class="container">
+
+<div class="section">
+    <h2>为什么需要微调 Memory Attention？</h2>
+
+    <p>SAM2 在做视频跟踪时，流程如下：</p>
+
+    <div class="diagram">
+<span class="c">    帧0: image → encoder → prompt → mask_decoder → mask
+                                        ↓
+                                  memory_encoder → 存入 Memory Bank
+                                                        ↓
+    帧1: image → encoder → <span class="p">MemoryAttention</span>(靠 Memory Bank 条件化) → mask_decoder → mask
+                                        ↓
+                                  memory_encoder → 更新 Memory Bank
+                                                        ↓
+    帧2: image → encoder → <span class="p">MemoryAttention</span>(靠更新后的 Memory Bank) → ...</div>
+
+    <p><strong>核心矛盾</strong>：Memory Attention 在自然视频上训练（平滑运动），但声呐目标是低速、离散、忽隐忽现的小亮点。冻结的 Memory Attention 用"平滑运动"的假设去匹配声呐的"跳跃运动"→ 特征匹配失败 → 跟踪漂移。</p>
+</div>
+
+<div class="section">
+    <h2>困难时间线</h2>
+
+    <div class="timeline">
+
+        <div class="tl-item fail">
+            <strong>困难 1：MemoryAttention.forward() 接口不兼容</strong>
+            <p>第一版直接调 <code>self.model.memory_attention(tgt=..., memory=..., pos=..., query_pos=...)</code>，报错 <code>got unexpected keyword argument 'tgt'</code></p>
+            <div class="warning">根因：MemoryAttention 的参数名是 <code>(curr, memory, curr_pos, memory_pos)</code>，不是 <code>(tgt, pos, query_pos)</code>。文档和源码不一致。</div>
+        </div>
+
+        <div class="tl-item fail">
+            <strong>困难 2：cross_attn 维度不匹配</strong>
+            <p>修正参数名后，报错 <code>mat1 and mat2 shapes cannot be multiplied (4096x256 and 64x256)</code></p>
+            <div class="diagram">
+<span class="c">    MemoryAttention 内部有两套注意力：</span>
+
+<span class="c">    ┌─────────────────────────────────────────────────┐</span>
+<span class="c">    │  self_attn:  q_proj(256→256)  k_proj(256→256)  │ ← 兼容 backbone 特征 (256维)
+<span class="c">    │              v_proj(256→256)  out_proj(256→256)  │</span>
+<span class="c">    ├─────────────────────────────────────────────────┤</span>
+<span class="c">    │  cross_attn: q_proj(256→256)  </span><span class="r">k_proj(64→256)</span><span class="c">  │ ← 期望 memory_encoder 输出 (64维)
+<span class="c">    │              </span><span class="r">v_proj(64→256)</span><span class="c">  out_proj(256→256)  │    不能直接喂 backbone 特征</span>
+<span class="c">    └─────────────────────────────────────────────────┘</span>
+</div>
+Our attempt to pass backbone features (256-dim) to cross_attn's k_proj (expects 64-dim) failed with dimension mismatch.
+</div>
+
+<div class="tl-item fail">
+<strong>困难 3：memory_encoder 输出格式不可达</strong>
+<p>要获得 64 维的 memory 特征，必须通过 <code>memory_encoder</code>：</p>
+<pre><code>memory_encoder(
+    pix_feat=vis_feats,             <span class="c">// backbone 特征</span>
+    maskmem_features=...,           <span class="c">// 需要 SAM2VideoPredictor 内部的 mask memory</span>
+    maskmem_pos_enc=...,            <span class="c">// 需要 SAM2VideoPredictor 内部的 memory 位置编码</span>
+)</code></pre>
+<div class="warning">这些输入只在 SAM2VideoPredictor 的 <code>@torch.inference_mode()</code> 上下文中可用。训练模式下无法访问。</div>
+</div>
+
+<div class="tl-item ok">
+<strong>解决：只训练 self_attn</strong>
+<p>绕开 cross_attn 和 memory_encoder，直接调用 Memory Attention 每一层的 <code>_forward_sa()</code> 方法：</p>
+<pre><code><span class="k">for</span> layer <span class="k">in</span> self.model.memory_attention.layers:
+    feat = layer._forward_sa(feat, query_pos)</code></pre>
+<p>这样 self_attn 的 q_proj/k_proj/v_proj/out_proj（全部 256 维）被正常训练，gradient 流动无误。推理时，cross_attn 仍然使用预训练权重，self_attn 已经适配了声呐特征。</p>
+</div>
+
+<div class="tl-item fail">
+<strong>困难 4：clip 训练时 DataLoader 维度混乱</strong>
+<p>clip 模式下 Dataset 返回 <code>(T, 3, H, W)</code>，DataLoader 又套了一层 batch 维度变成 <code>(1, T, 3, H, W)</code>。不加 squeeze 时在 forward_clip 里维度对不上。</p>
+<div class="ok-box" style="background: rgba(88,166,255,0.1); border-color: rgba(88,166,255,0.3);">
+<strong>解决</strong>：训练循环中检测 clip_mode，做 <code>images.squeeze(0)</code>。
+</div>
+</div>
+
+<div class="tl-item fail">
+<strong>困难 5：clip 模式不支持标准数据增强</strong>
+<p>单帧模式下水平翻转、亮度抖动等增强按帧随机应用。clip 模式下 4 帧是连续的，不能随机翻转/打乱——会破坏帧间一致性。</p>
+<div class="ok-box" style="background: rgba(88,166,255,0.1); border-color: rgba(88,166,255,0.3);">
+<strong>解决</strong>：clip 模式下跳过数据增强（仅做归一化），保持帧间物理一致性。
+</div>
+</div>
+
+    </div>
+</div>
+
+<div class="section">
+    <h2>最终架构</h2>
+
+    <div class="diagram">
+<span class="c">    ╔═══════════════════ 训练时 ═══════════════════╗</span>
+<span class="c">    ║                                              ║</span>
+<span class="c">    ║  Clip (4帧连续)                               ║</span>
+<span class="c">    ║                                              ║</span>
+<span class="c">    ║  帧0: forward_image → prompt → mask_decoder  ║</span>
+<span class="c">    ║  帧1: forward_image → </span><span class="p">self_attn only</span><span class="c"> → mask_decoder  ║</span>
+<span class="c">    ║  帧2: forward_image → </span><span class="p">self_attn only</span><span class="c"> → mask_decoder  ║</span>
+<span class="c">    ║  帧3: forward_image → </span><span class="p">self_attn only</span><span class="c"> → mask_decoder  ║</span>
+<span class="c">    ║       ↓                            ↓         ║</span>
+<span class="c">    ║  全部4帧的 Dice+Focal Loss                    ║</span>
+<span class="c">    ║                                              ║</span>
+<span class="c">    ╚══════════════════════════════════════════════╝</span>
+
+<span class="c">    ╔═══════════════════ 推理时 ═══════════════════╗</span>
+<span class="c">    ║                                              ║</span>
+<span class="c">    ║  SAM2VideoPredictor (标准流程)                ║</span>
+<span class="c">    ║                                              ║</span>
+<span class="c">    ║  self_attn: </span><span class="g">已适配声呐特征</span><span class="c">                        ║</span>
+<span class="c">    ║  cross_attn: 预训练权重（冻结）               ║</span>
+<span class="c">    ║  memory_encoder: 预训练权重（冻结）           ║</span>
+<span class="c">    ║                                              ║</span>
+<span class="c">    ╚══════════════════════════════════════════════╝</span>
+</div>
+</div>
+
+<div class="section">
+    <h2>LoRA 注入策略</h2>
+
+<table>
+<tr><th>模块</th><th>LoRA 注入目标</th><th>层数</th><th>参数量</th></tr>
+<tr><td>Image Encoder (Stage 2-3)</td><td>attn.qkv, attn.proj, proj</td><td>20</td><td>0.09M</td></tr>
+<tr><td><strong>Memory Attention (4层)</strong></td><td><strong>self_attn: q_proj, k_proj, v_proj, out_proj</strong></td><td><strong>16</strong></td><td><strong>0.08M</strong></td></tr>
+<tr><td>Memory Attention cross_attn</td><td>不注入（保持冻结）</td><td>16</td><td>0</td></tr>
+<tr><td>Mask Decoder</td><td>全量微调</td><td>—</td><td>4.22M</td></tr>
+</table>
+
+<p>总可训练参数：~4.39M（仅增加 0.08M Memory LoRA）</p>
+</div>
+
+<div class="section">
+    <h2>效果验证 (2 epoch)</h2>
+
+<table>
+<tr><th>指标</th><th>基线 (50ep, 无Memory)</th><th>Clip+Memory (仅2ep)</th></tr>
+<tr><td>IoU</td><td>0.508</td><td>0.461</td></tr>
+<tr><td>nIoU</td><td>0.667</td><td>0.581</td></tr>
+<tr><td><strong>Pd (检测率)</strong></td><td>0.444</td><td><strong>0.512 ✅</strong></td></tr>
+</table>
+
+<div class="ok-box">
+2 epoch 的检测率已经超过 50 epoch 基线——Memory Attention 训练确实在改善跟踪能力。长训练有望全面超越。
+</div>
+</div>
+
+<div class="section">
+    <h2>关键技术决策</h2>
+
+<table>
+<tr><th>决策</th><th>选择</th><th>原因</th></tr>
+<tr><td>只训 self_attn?</td><td>✅ 是</td><td>cross_attn 需要不可达的 memory_encoder 输出</td></tr>
+<tr><td>Clip 长度</td><td>4 帧</td><td>与原始 SAM2 训练一致</td></tr>
+<tr><td>Clip 内增强</td><td>❌ 不做</td><td>保持帧间物理一致性</td></tr>
+<tr><td>Memory LoRA rank</td><td>4</td><td>与 Image Encoder 一致</td></tr>
+<tr><td>LoRA 注入目标</td><td>self_attn 的 q/k/v/out_proj</td><td>这些都是 256→256，兼容 backbone 特征</td></tr>
+</table>
+</div>
+
+<footer>2025 · Auto-Prompt SAM2 · Memory Attention Fine-Tuning</footer>
+</div>
+</body>
+</html>
