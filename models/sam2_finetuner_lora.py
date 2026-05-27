@@ -346,16 +346,19 @@ class SAM2LoRAFineTuner(nn.Module):
                 blocks = trunk.blocks
                 total_blocks = len(blocks)
 
-                # 从 Hiera 配置动态获取 stage boundaries
-                # stages: [1, 2, 7, 2] → stage_ends = [1, 3, 10, 12]
+                # stage_ends 是每个 stage 的最后一个 block 索引
+                # 例如 [0, 2, 9, 11] 表示：
+                #   Stage 0: blocks [0]  (1 block)
+                #   Stage 1: blocks [1, 2]  (2 blocks)
+                #   Stage 2: blocks [3, 4, 5, 6, 7, 8, 9]  (7 blocks)
+                #   Stage 3: blocks [10, 11]  (2 blocks)
                 if hasattr(trunk, 'stage_ends'):
                     stage_ends = list(trunk.stage_ends)
                 else:
-                    # 回退：从 stages 属性推导
-                    stage_ends = [1, 3, 10, 12]
+                    stage_ends = [0, 2, 9, 11]
 
-                # 转换为起始索引
-                stage_boundaries = [0] + stage_ends
+                # 转换为起始索引: [0, 1, 3, 10, 12]
+                stage_boundaries = [0] + [se + 1 for se in stage_ends]
 
                 for stage_idx in inject_stages:
                     if stage_idx >= len(stage_boundaries) - 1:

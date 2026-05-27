@@ -51,6 +51,8 @@ def parse_args():
     parser.add_argument('--weight-decay', type=float, default=1e-4)
     parser.add_argument('--lora-rank', type=int, default=4)
     parser.add_argument('--lora-alpha', type=int, default=8)
+    parser.add_argument('--lora-stages', type=str, default='2,3',
+                        help='LoRA注入的Hiera stage（逗号分隔，默认2,3=中层+深层）')
     parser.add_argument('--optimizer', type=str, default='muon_adam',
                         choices=['adamw', 'muon_adam'],
                         help='优化器: adamw 或 muon_adam (Muon+AdamW混合)')
@@ -413,12 +415,15 @@ def main():
 
     # 构建模型
     print(f"\n加载模型: {args.sam2_ckpt}")
+    inject_stages = [int(s) for s in args.lora_stages.split(',')]
+
     model = SAM2LoRAFineTuner(
         sam2_config=args.sam2_config,
         sam2_checkpoint=args.sam2_ckpt,
         device=args.device,
         lora_rank=args.lora_rank,
         lora_alpha=args.lora_alpha,
+        inject_stages=inject_stages,
         finetune_memory=args.finetune_memory
     )
 
