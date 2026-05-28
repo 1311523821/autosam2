@@ -46,33 +46,7 @@ class SAM2ClipTrainer(SAM2LoRAFineTuner):
 
         # 用 LoRA 注入后的 model 创建 forked predictor
         from .sam2_video_predictor_train import SAM2VideoPredictor
-
-        self.predictor = SAM2VideoPredictor.__new__(SAM2VideoPredictor)
-        # 复制原始 predictor 的关键属性
-        self.predictor.model = self.model
-        self.predictor.device = self.device
-        self.predictor.image_size = self.model.image_size
-        self.predictor._transforms_device = self.device
-        self.predictor._bb_feat_sizes = [
-            (self.model.image_size // 4, self.model.image_size // 4),
-            (self.model.image_size // 8, self.model.image_size // 8),
-            (self.model.image_size // 16, self.model.image_size // 16),
-        ]
-        # 注入必要的内部方法引用
-        from types import MethodType
-        from sam2.sam2_video_predictor import SAM2VideoPredictor as OrigPredictor
-        self.predictor._get_image_feature = MethodType(OrigPredictor._get_image_feature, self.predictor)
-        self.predictor._prepare_backbone_features = self.model._prepare_backbone_features
-        self.predictor.add_new_points = MethodType(OrigPredictor.add_new_points, self.predictor)
-        self.predictor.add_new_points_or_box = MethodType(OrigPredictor.add_new_points_or_box, self.predictor)
-        self.predictor.propagate_in_video = MethodType(OrigPredictor.propagate_in_video, self.predictor)
-        self.predictor.propagate_in_video_preflight = MethodType(OrigPredictor.propagate_in_video_preflight, self.predictor)
-
-        # init_state_from_frames 是我们自己加的
-        self.predictor.init_state_from_frames = MethodType(
-            OrigPredictor.init_state_from_frames, self.predictor
-        ) if hasattr(OrigPredictor, 'init_state_from_frames') else None
-
+        self.predictor = SAM2VideoPredictor.from_model(self.model, device=self.device)
         print("✓ Clip Trainer 初始化完成（完整 Memory Attention 可导）")
 
     def train_clip(

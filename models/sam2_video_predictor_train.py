@@ -38,6 +38,23 @@ class SAM2VideoPredictor(SAM2Base):
         self.clear_non_cond_mem_around_input = clear_non_cond_mem_around_input
         self.add_all_frames_to_correct_as_cond = add_all_frames_to_correct_as_cond
 
+    @classmethod
+    def from_model(cls, prebuilt_model, device='cuda'):
+        """从已构建的 model（含 LoRA）创建 predictor 实例"""
+        import torch.nn as nn
+        predictor = cls.__new__(cls)
+        nn.Module.__init__(predictor)
+        predictor.model = prebuilt_model
+        predictor.device = device
+        predictor.image_size = prebuilt_model.image_size
+        predictor._transforms_device = device
+        predictor._bb_feat_sizes = [
+            (prebuilt_model.image_size // 4, prebuilt_model.image_size // 4),
+            (prebuilt_model.image_size // 8, prebuilt_model.image_size // 8),
+            (prebuilt_model.image_size // 16, prebuilt_model.image_size // 16),
+        ]
+        return predictor
+
     def init_state_from_frames(
         self,
         frames,  # torch.Tensor (T, 3, H, W) — 已在GPU上的归一化tensor

@@ -72,5 +72,24 @@ python scripts/evaluate_e2e.py --test-list /root/e2e/test1.txt
 
 **Data**: Sonar B-scan grayscale images (~1000x500), JSON polygon annotations with 'uuv' label.
 
+## 测试先行
+
+**开发新功能、修改 core/ 核心代码前，必须先设计测试用例。**
+
+测试用例需明确回答三个问题：
+1. **验证什么**？被测功能的具体行为
+2. **怎么验证**？可执行的代码步骤
+3. **预期结果**？通过/失败的判断标准
+
+测试放在 `tests/` 目录，命名格式 `test_<功能>.py`。示例：
+```python
+# 测试 1: 验证梯度流经 Memory Attention
+# 预期: train_clip() 后 memory_attention.lora_A.grad ≠ 0
+# 测试 2: 验证 checkpoint 兼容性
+# 预期: build_sam2_video_predictor 能加载 best_inference.pth
+```
+
+实现前先跑测试确认当前状态，实现后再次跑测试确认改进。
+
 ## 代码审查
 写完代码需要使用subagent进行审查，保证逻辑的合理性，避免引入新的问题。
