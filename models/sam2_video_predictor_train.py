@@ -44,10 +44,14 @@ class SAM2VideoPredictor(SAM2Base):
         import torch.nn as nn
         predictor = cls.__new__(cls)
         nn.Module.__init__(predictor)
-        predictor.model = prebuilt_model
-        predictor.device = device
-        predictor.image_size = prebuilt_model.image_size
-        predictor._transforms_device = device
+        # 用 object.__setattr__ 绕过 SAM2Base 的只读属性
+        for attr, val in [
+            ('model', prebuilt_model),
+            ('_device', device),  # SAM2Base 内部用 _device
+            ('image_size', prebuilt_model.image_size),
+            ('_transforms_device', device),
+        ]:
+            object.__setattr__(predictor, attr, val)
         predictor._bb_feat_sizes = [
             (prebuilt_model.image_size // 4, prebuilt_model.image_size // 4),
             (prebuilt_model.image_size // 8, prebuilt_model.image_size // 8),
