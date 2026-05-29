@@ -38,70 +38,7 @@ class SAM2VideoPredictor(SAM2Base):
         self.clear_non_cond_mem_around_input = clear_non_cond_mem_around_input
         self.add_all_frames_to_correct_as_cond = add_all_frames_to_correct_as_cond
 
-    @classmethod
-    def from_model(cls, prebuilt_model, device='cuda'):
-        """从已构建的 model（含 LoRA）创建 predictor 实例"""
-        import torch.nn as nn
-        predictor = cls.__new__(cls)
-        nn.Module.__init__(predictor)
-        # 用 object.__setattr__ 绕过 SAM2Base 的只读属性
-        for attr, val in [
-            ('model', prebuilt_model),
-            ('_device', device),  # SAM2Base 内部用 _device
-            ('image_size', prebuilt_model.image_size),
-            ('_transforms_device', device),
-        ]:
-            object.__setattr__(predictor, attr, val)
-        predictor._bb_feat_sizes = [
-            (prebuilt_model.image_size // 4, prebuilt_model.image_size // 4),
-            (prebuilt_model.image_size // 8, prebuilt_model.image_size // 8),
-            (prebuilt_model.image_size // 16, prebuilt_model.image_size // 16),
-        ]
-        return predictor
-
-    def init_state_from_frames(
-        self,
-        frames,  # torch.Tensor (T, 3, H, W) — 已在GPU上的归一化tensor
-        video_height=1024,
-        video_width=1024,
-        offload_video_to_cpu=False,
-        offload_state_to_cpu=False,
-    ):
-        """初始化推理状态（直接接受GPU tensor，零拷贝开销）"""
-        compute_device = self.device
-
-        # frames 已经是 (T, 3, H, W) 的 GPU tensor，直接使用
-        if isinstance(frames, torch.Tensor):
-            if frames.ndim == 3:  # (H, W, 3) 单帧
-                frames = frames.unsqueeze(0).permute(0, 3, 1, 2)  # (1, 3, H, W)
-            elif frames.shape[-1] == 3:  # (T, H, W, 3)
-                frames = frames.permute(0, 3, 1, 2)  # (T, 3, H, W)
-            # 转成 list of tensors
-            images = [frames[t] for t in range(len(frames))]
-
-        inference_state = {}
-        inference_state["images"] = images
-        inference_state["num_frames"] = len(images)
-        inference_state["offload_video_to_cpu"] = offload_video_to_cpu
-        inference_state["offload_state_to_cpu"] = offload_state_to_cpu
-        inference_state["video_height"] = video_height or image_size
-        inference_state["video_width"] = video_width or image_size
-        inference_state["device"] = compute_device
-        inference_state["storage_device"] = compute_device if not offload_state_to_cpu else torch.device("cpu")
-        inference_state["point_inputs_per_obj"] = {}
-        inference_state["mask_inputs_per_obj"] = {}
-        inference_state["cached_features"] = {}
-        inference_state["constants"] = {}
-        inference_state["obj_id_to_idx"] = OrderedDict()
-        inference_state["obj_idx_to_id"] = OrderedDict()
-        inference_state["obj_ids"] = []
-        inference_state["output_dict_per_obj"] = {}
-        inference_state["temp_output_dict_per_obj"] = {}
-        inference_state["frames_tracked_per_obj"] = {}
-        self._get_image_feature(inference_state, frame_idx=0, batch_size=1)
-        return inference_state
-
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def init_state(
         self,
         video_path,
@@ -220,7 +157,7 @@ class SAM2VideoPredictor(SAM2Base):
         """Get the total number of unique object ids received so far in this session."""
         return len(inference_state["obj_idx_to_id"])
 
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def add_new_points_or_box(
         self,
         inference_state,
@@ -359,7 +296,7 @@ class SAM2VideoPredictor(SAM2Base):
         """Deprecated method. Please use `add_new_points_or_box` instead."""
         return self.add_new_points_or_box(*args, **kwargs)
 
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def add_new_mask(
         self,
         inference_state,
@@ -539,7 +476,7 @@ class SAM2VideoPredictor(SAM2Base):
 
         return consolidated_out
 
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def propagate_in_video_preflight(self, inference_state):
         """Prepare inference_state and consolidate temporary outputs before tracking."""
         # Check and make sure that every object has received input points or masks.
@@ -605,7 +542,7 @@ class SAM2VideoPredictor(SAM2Base):
             for frame_idx in obj_output_dict["cond_frame_outputs"]:
                 obj_output_dict["non_cond_frame_outputs"].pop(frame_idx, None)
 
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def propagate_in_video(
         self,
         inference_state,
@@ -692,7 +629,7 @@ class SAM2VideoPredictor(SAM2Base):
             )
             yield frame_idx, obj_ids, video_res_masks
 
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def clear_all_prompts_in_frame(
         self, inference_state, frame_idx, obj_id, need_output=True
     ):
@@ -735,7 +672,7 @@ class SAM2VideoPredictor(SAM2Base):
         )
         return frame_idx, obj_ids, video_res_masks
 
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def reset_state(self, inference_state):
         """Remove all input points or mask in all frames throughout the video."""
         self._reset_tracking_results(inference_state)
@@ -926,7 +863,7 @@ class SAM2VideoPredictor(SAM2Base):
             expanded_maskmem_pos_enc = None
         return expanded_maskmem_pos_enc
 
-    # REMOVED @torch.inference_mode() for training
+    @torch.inference_mode()
     def remove_object(self, inference_state, obj_id, strict=False, need_output=True):
         """
         Remove an object id from the tracking state. If strict is True, we check whether
